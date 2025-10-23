@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,17 +11,21 @@
       margin: 40px;
       background-color: #f7f7f7;
     }
+
     h1 {
       color: #333;
       margin-bottom: 10px;
     }
-    input, button {
+
+    input,
+    button {
       display: block;
       margin-top: 10px;
       width: 100%;
       font-size: 1rem;
       padding: 8px;
     }
+
     button {
       background-color: #0077cc;
       color: white;
@@ -28,42 +33,51 @@
       border-radius: 5px;
       cursor: pointer;
     }
+
     button:hover {
       background-color: #005fa3;
     }
+
     .player-section {
       margin-top: 40px;
       background: white;
       padding: 15px;
       border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     }
+
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 10px;
     }
-    th, td {
+
+    th,
+    td {
       border: 1px solid #ddd;
       padding: 6px 10px;
       text-align: left;
     }
+
     th {
       background-color: #0077cc;
       color: white;
     }
+
     tr:nth-child(even) {
       background-color: #f2f2f2;
     }
+
     #chartContainer {
       margin-top: 50px;
       background: white;
       padding: 20px;
       border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     }
   </style>
 </head>
+
 <body>
   <h1>DWZ-Verlauf mehrerer Spieler</h1>
   <label for="pkz">Spieler-IDs (kommagetrennt):</label>
@@ -112,109 +126,109 @@
       return new Date(year, month - 1, day);
     }
 
-async function fetchPlayerData(pkz, color) {
-  const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-  const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-  const playerSection = document.createElement('div');
-  playerSection.className = 'player-section';
-  playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p>Lade Daten...</p>`;
-  document.getElementById('playersContainer').appendChild(playerSection);
+    async function fetchPlayerData(pkz, color) {
+      const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
+      const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const playerSection = document.createElement('div');
+      playerSection.className = 'player-section';
+      playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p>Lade Daten...</p>`;
+      document.getElementById('playersContainer').appendChild(playerSection);
 
-  try {
-    const response = await fetch(corsUrl);
-    if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
-    const csv = await response.text();
-    const rows = csv.trim().split('\n').map(r => r.split('|'));
+      try {
+        const response = await fetch(corsUrl);
+        if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
+        const csv = await response.text();
+        const rows = csv.trim().split('\n').map(r => r.split('|'));
 
-    // ✅ Get player's name from second row, third column
-    const playerName = rows[1]?.[2]?.trim() || `Spieler ${pkz}`;
+        // ✅ Get player's name from second row, third column
+        const playerName = rows[1]?.[2]?.trim() || `Spieler ${pkz}`;
 
-    // ✅ Dynamically find header row by "turniercode"
-    const headerIndex = rows.findIndex(
-      r => r[0] && r[0].trim().toLowerCase() === 'turniercode'
-    );
-    if (headerIndex === -1) {
-      playerSection.innerHTML = `<h2>${playerName}</h2><p style="color:red;">Keine Kopfzeile ("turniercode") gefunden.</p>`;
-      return null;
-    }
+        // ✅ Dynamically find header row by "turniercode"
+        const headerIndex = rows.findIndex(
+          r => r[0] && r[0].trim().toLowerCase() === 'turniercode'
+        );
+        if (headerIndex === -1) {
+          playerSection.innerHTML = `<h2>${playerName}</h2><p style="color:red;">Keine Kopfzeile ("turniercode") gefunden.</p>`;
+          return null;
+        }
 
-    const headers = rows[headerIndex];
-    const dataRows = rows.slice(headerIndex + 1); //, headerIndex + 16); // ✅ now 15 data rows
+        const headers = rows[headerIndex];
+        const dataRows = rows.slice(headerIndex + 1); //, headerIndex + 16); // ✅ now 15 data rows
 
-    if (dataRows.length === 0) {
-      playerSection.innerHTML = `<h2>${playerName}</h2><p>Keine Datenzeilen gefunden.</p>`;
-      return null;
-    }
+        if (dataRows.length === 0) {
+          playerSection.innerHTML = `<h2>${playerName}</h2><p>Keine Datenzeilen gefunden.</p>`;
+          return null;
+        }
 
-    // ✅ Case-insensitive match for DWZneu column
-    const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
+        // ✅ Case-insensitive match for DWZneu column
+        const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
 
-    // ✅ Collect tournament codes
-    const tournaments = dataRows.map(r => r[0]?.trim()).filter(Boolean);
+        // ✅ Collect tournament codes
+        const tournaments = dataRows.map(r => r[0]?.trim()).filter(Boolean);
 
-    // ✅ Fetch tournament dates in parallel
-    const dateResults = await Promise.allSettled(
-      tournaments.map(code => fetchTournamentDate(code))
-    );
+        // ✅ Fetch tournament dates in parallel
+        const dateResults = await Promise.allSettled(
+          tournaments.map(code => fetchTournamentDate(code))
+        );
 
-    // ✅ Build table
-    const table = document.createElement('table');
-    const thead = document.createElement('thead');
-    const tbody = document.createElement('tbody');
+        // ✅ Build table
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
 
-    const headerRow = document.createElement('tr');
-    headers.forEach(h => {
-      const th = document.createElement('th');
-      th.textContent = h.trim();
-      headerRow.appendChild(th);
-    });
-    const thDate = document.createElement('th');
-    thDate.textContent = 'Turnierdatum';
-    headerRow.appendChild(thDate);
-    thead.appendChild(headerRow);
+        const headerRow = document.createElement('tr');
+        headers.forEach(h => {
+          const th = document.createElement('th');
+          th.textContent = h.trim();
+          headerRow.appendChild(th);
+        });
+        const thDate = document.createElement('th');
+        thDate.textContent = 'Turnierdatum';
+        headerRow.appendChild(thDate);
+        thead.appendChild(headerRow);
 
-    const chartPoints = [];
+        const chartPoints = [];
 
-    dataRows.forEach((row, i) => {
-      const tr = document.createElement('tr');
-      row.forEach(cell => {
-        const td = document.createElement('td');
-        td.textContent = cell.trim();
-        tr.appendChild(td);
-      });
+        dataRows.forEach((row, i) => {
+          const tr = document.createElement('tr');
+          row.forEach(cell => {
+            const td = document.createElement('td');
+            td.textContent = cell.trim();
+            tr.appendChild(td);
+          });
 
-      const dateStr =
-        dateResults[i]?.status === 'fulfilled' ? dateResults[i].value : null;
-      const dateTd = document.createElement('td');
-      dateTd.textContent = dateStr || 'Unbekannt';
-      tr.appendChild(dateTd);
-      tbody.appendChild(tr);
+          const dateStr =
+            dateResults[i]?.status === 'fulfilled' ? dateResults[i].value : null;
+          const dateTd = document.createElement('td');
+          dateTd.textContent = dateStr || 'Unbekannt';
+          tr.appendChild(dateTd);
+          tbody.appendChild(tr);
 
-      const dwzValue =
-        dwzIndex >= 0 && row[dwzIndex] ? parseInt(row[dwzIndex].trim()) : NaN;
-      const dateObj = parseDateString(dateStr || '');
-      if (dateObj && !isNaN(dwzValue)) {
-        chartPoints.push({ x: dateObj, y: dwzValue });
+          const dwzValue =
+            dwzIndex >= 0 && row[dwzIndex] ? parseInt(row[dwzIndex].trim()) : NaN;
+          const dateObj = parseDateString(dateStr || '');
+          if (dateObj && !isNaN(dwzValue)) {
+            chartPoints.push({ x: dateObj, y: dwzValue });
+          }
+        });
+
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        playerSection.innerHTML = `<h2>${playerName}</h2>`;
+        playerSection.appendChild(table);
+
+        chartPoints.sort((a, b) => a.x - b.x);
+
+        console.log(`✅ ${playerName}: ${chartPoints.length} Punkte`, chartPoints);
+
+        return { pkz, playerName, data: chartPoints, color };
+
+      } catch (err) {
+        playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p style="color:red;">Fehler: ${err.message}</p>`;
+        console.error(err);
+        return null;
       }
-    });
-
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    playerSection.innerHTML = `<h2>${playerName}</h2>`;
-    playerSection.appendChild(table);
-
-    chartPoints.sort((a, b) => a.x - b.x);
-
-    console.log(`✅ ${playerName}: ${chartPoints.length} Punkte`, chartPoints);
-
-    return { pkz, playerName, data: chartPoints, color };
-
-  } catch (err) {
-    playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p style="color:red;">Fehler: ${err.message}</p>`;
-    console.error(err);
-    return null;
-  }
-}
+    }
 
     document.getElementById('fetchBtn').addEventListener('click', async () => {
       const input = document.getElementById('pkz').value.trim();
@@ -271,4 +285,5 @@ async function fetchPlayerData(pkz, color) {
     });
   </script>
 </body>
+
 </html>
