@@ -121,8 +121,8 @@
     ];
 
     // Simple localStorage cache for tournament dates
-    const TOURNAMENT_CACHE_KEY = 'ch_tournament_dates_v1';
-    const TOURNAMENT_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 days
+    const TOURNAMENT_CACHE_KEY = 'ch_tournament_dates_v2';
+    // Tournament dates are fixed; do not expire in the cache.
 
     function loadTournamentCache() {
       try { return JSON.parse(localStorage.getItem(TOURNAMENT_CACHE_KEY) || '{}'); }
@@ -150,7 +150,7 @@
       cacheStatusEl.textContent = `Cache: Hits ${cacheHits} · Misses ${cacheMisses}`;
     }
 
-    // If a cached entry exists and is fresh, return it. Otherwise fetch and store.
+    // If a cached entry exists, return it. Otherwise fetch and store.
     async function fetchTournamentDate(tournamentCode) {
       if (!tournamentCode) return null;
       // Ensure we have the run-local cache loaded once
@@ -159,14 +159,16 @@
       }
 
       const code = (tournamentCode || '').trim();
-      const now = Date.now();
-      const entry = inMemoryTournamentCache[code];
+      // cache stores the date string (or null) directly. presence (not undefined)
+      // indicates a cached value that never expires.
+      const entry = Object.prototype.hasOwnProperty.call(inMemoryTournamentCache, code)
+        ? inMemoryTournamentCache[code]
+        : undefined;
 
-      // fresh in-memory cache hit
-      if (entry && (now - (entry.ts || 0)) < TOURNAMENT_CACHE_TTL) {
+      if (entry !== undefined) {
         cacheHits++;
         updateCacheStatus();
-        return entry.date || null;
+        return entry; // may be null
       }
 
       // If a fetch for the same tournament code is already in-flight, await it
@@ -176,7 +178,7 @@
           // result may be null -> still counts as served (not a new miss here)
           return result;
         } catch (e) {
-          return entry ? entry.date || null : null;
+          return entry !== undefined ? entry : null;
         }
       }
 
@@ -193,13 +195,13 @@
           const doc = parser.parseFromString(html, 'text/html');
           const row = doc.querySelector('.row_3');
           const dateStr = row ? (row.querySelector('.col_2.value.bottom-line')?.textContent?.trim() || null) : null;
-          // update in-memory cache only (persist later)
-          inMemoryTournamentCache[code] = { date: dateStr, ts: Date.now() };
+          // update in-memory cache only (persist later). store date string (or null).
+          inMemoryTournamentCache[code] = dateStr;
           return dateStr;
         } catch (err) {
           console.error('Fehler Turnierdatum:', err);
           // on error, do not overwrite existing in-memory cache; return fallback
-          return entry ? entry.date || null : null;
+          return entry !== undefined ? entry : null;
         } finally {
           // pending fetch finished - remove entry
           delete pendingTournamentFetches[code];
