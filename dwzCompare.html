@@ -147,7 +147,11 @@
     const cacheStatusEl = document.getElementById('cacheStatus');
     function updateCacheStatus() {
       if (!cacheStatusEl) return;
-      cacheStatusEl.textContent = `Cache: Hits ${cacheHits} · Misses ${cacheMisses}`;
+      // show number of cached entries as well (use in-memory cache if available,
+      // otherwise read from localStorage)
+      const cacheSource = inMemoryTournamentCache || loadTournamentCache();
+      const size = cacheSource ? Object.keys(cacheSource).length : 0;
+      cacheStatusEl.textContent = `Cache: Hits ${cacheHits} · Misses ${cacheMisses} · Einträge ${size}`;
     }
 
     // If a cached entry exists, return it. Otherwise fetch and store.
