@@ -124,6 +124,17 @@
     const TOURNAMENT_CACHE_KEY = 'ch_tournament_dates_v2';
     // Tournament dates are fixed; do not expire in the cache.
 
+    // Previous player input key + helpers
+    const PREV_INPUT_KEY = 'ch_prev_pkz_v1';
+    function loadPreviousInput() {
+      try { return localStorage.getItem(PREV_INPUT_KEY) || ''; }
+      catch (e) { return ''; }
+    }
+    function savePreviousInput(value) {
+      try { localStorage.setItem(PREV_INPUT_KEY, value || ''); }
+      catch (e) { /* ignore storage errors */ }
+    }
+
     function loadTournamentCache() {
       try { return JSON.parse(localStorage.getItem(TOURNAMENT_CACHE_KEY) || '{}'); }
       catch (e) { return {}; }
@@ -132,6 +143,11 @@
       try { localStorage.setItem(TOURNAMENT_CACHE_KEY, JSON.stringify(cache)); }
       catch (e) { /* ignore storage errors */ }
     }
+    // restore previous input on page load
+    try {
+      const prev = loadPreviousInput();
+      if (prev) document.getElementById('pkz').value = prev;
+    } catch (e) { /* ignore */ }
 
     // In-memory shared cache for the current run to avoid localStorage race overwrites
     // and to reuse loaded entries across parallel fetchTournamentDate calls.
@@ -378,14 +394,16 @@
     }
 
     document.getElementById('fetchBtn').addEventListener('click', async () => {
-      // reset cache visual counters on each new run so the widget reflects this run
-      cacheHits = 0;
-      cacheMisses = 0;
-      // initialize run-local cache from localStorage once
-      inMemoryTournamentCache = loadTournamentCache();
-      updateCacheStatus();
-
+       // reset cache visual counters on each new run so the widget reflects this run
+       cacheHits = 0;
+       cacheMisses = 0;
+       // initialize run-local cache from localStorage once
+       inMemoryTournamentCache = loadTournamentCache();
+       updateCacheStatus();
+ 
        const input = document.getElementById('pkz').value.trim();
++      // remember last-used player list
++      savePreviousInput(input);
        const ids = input.split(',').map(x => x.trim()).filter(Boolean);
        const container = document.getElementById('playersContainer');
        container.innerHTML = '';
