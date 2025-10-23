@@ -91,6 +91,40 @@
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
       z-index: 9999;
     }
+
+    /* Chart controls placed above player tables */
+    #chartArea {
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+    }
+
+    /* Ensure checkbox is not stretched by the generic input rule */
+    .chart-controls input[type="checkbox"] {
+      display: inline-block;
+      width: auto;
+      height: auto;
+      margin: 0;
+      transform: scale(1.05);
+      cursor: pointer;
+    }
+
+    .chart-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #222;
+    }
   </style>
 </head>
 
@@ -100,16 +134,18 @@
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
   <button id="fetchBtn">Daten abrufen</button>
 
+  <!-- Chart and controls moved above the player tables -->
+  <div id="chartArea">
+    <div class="chart-controls">
+      <label for="ageAdjustCheckbox"><input type="checkbox" id="ageAdjustCheckbox"> Altersanpassung</label>
+    </div>
+
+    <div id="chartContainer">
+      <canvas id="dwzChart" width="800" height="400"></canvas>
+    </div>
+  </div>
+
   <div id="playersContainer"></div>
-
-  <!-- Age adjustment toggle -->
-  <div style="margin-top:12px;">
-    <label><input type="checkbox" id="ageAdjustCheckbox"> Altersanpassung aktiv</label>
-  </div>
-
-  <div id="chartContainer">
-    <canvas id="dwzChart" width="800" height="400"></canvas>
-  </div>
 
   <!-- Visual cache status (updated at runtime) -->
   <div id="cacheStatus" aria-live="polite" title="Cache-Treffer / -Fehler">Cache: Hits 0 · Misses 0</div>
