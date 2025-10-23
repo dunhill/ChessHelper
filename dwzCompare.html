@@ -129,9 +129,14 @@
     async function fetchPlayerData(pkz, color) {
       const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
       const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-      const playerSection = document.createElement('div');
-      playerSection.className = 'player-section';
-      playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p>Lade Daten...</p>`;
+  const playerSection = document.createElement('div');
+  playerSection.className = 'player-section';
+  const loadingH2 = document.createElement('h2');
+  loadingH2.textContent = `Spieler ${pkz}`;
+  const loadingP = document.createElement('p');
+  loadingP.textContent = 'Lade Daten...';
+  playerSection.appendChild(loadingH2);
+  playerSection.appendChild(loadingP);
       document.getElementById('playersContainer').appendChild(playerSection);
 
       try {
@@ -148,15 +153,28 @@
           r => r[0] && r[0].trim().toLowerCase() === 'turniercode'
         );
         if (headerIndex === -1) {
-          playerSection.innerHTML = `<h2>${playerName}</h2><p style="color:red;">Keine Kopfzeile ("turniercode") gefunden.</p>`;
+          playerSection.innerHTML = '';
+          const h = document.createElement('h2');
+          h.textContent = playerName;
+          const p = document.createElement('p');
+          p.style.color = 'red';
+          p.textContent = 'Keine Kopfzeile ("turniercode") gefunden.';
+          playerSection.appendChild(h);
+          playerSection.appendChild(p);
           return null;
         }
 
-        const headers = rows[headerIndex];
-        const dataRows = rows.slice(headerIndex + 1); //, headerIndex + 16); // ✅ now 15 data rows
+  const headers = rows[headerIndex] || [];
+  const dataRows = rows.slice(headerIndex + 1); // keep all data rows
 
         if (dataRows.length === 0) {
-          playerSection.innerHTML = `<h2>${playerName}</h2><p>Keine Datenzeilen gefunden.</p>`;
+          playerSection.innerHTML = '';
+          const h = document.createElement('h2');
+          h.textContent = playerName;
+          const p = document.createElement('p');
+          p.textContent = 'Keine Datenzeilen gefunden.';
+          playerSection.appendChild(h);
+          playerSection.appendChild(p);
           return null;
         }
 
@@ -179,7 +197,7 @@
         const headerRow = document.createElement('tr');
         headers.forEach(h => {
           const th = document.createElement('th');
-          th.textContent = h.trim();
+          th.textContent = (h || '').trim();
           headerRow.appendChild(th);
         });
         const thDate = document.createElement('th');
@@ -189,33 +207,50 @@
 
         const chartPoints = [];
 
+        // Build list of tournament codes with their original dataRows index so
+        // the dateResults can be mapped back to the correct row even if some
+        // codes are missing/empty.
+        const tournamentsWithIndex = dataRows
+          .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
+          .filter(t => t.code);
+
+        // Map settled results back to original row indices
+        const dateMap = {};
+        dateResults.forEach((res, i) => {
+          const info = tournamentsWithIndex[i];
+          if (!info) return;
+          dateMap[info.idx] = res.status === 'fulfilled' ? res.value : null;
+        });
+
         dataRows.forEach((row, i) => {
           const tr = document.createElement('tr');
-          row.forEach(cell => {
+          (row || []).forEach(cell => {
             const td = document.createElement('td');
-            td.textContent = cell.trim();
+            td.textContent = (cell || '').trim();
             tr.appendChild(td);
           });
 
-          const dateStr =
-            dateResults[i]?.status === 'fulfilled' ? dateResults[i].value : null;
+          const dateStr = dateMap[i] || null;
           const dateTd = document.createElement('td');
           dateTd.textContent = dateStr || 'Unbekannt';
           tr.appendChild(dateTd);
           tbody.appendChild(tr);
 
-          const dwzValue =
-            dwzIndex >= 0 && row[dwzIndex] ? parseInt(row[dwzIndex].trim()) : NaN;
+          const dwzValue = dwzIndex >= 0 && (row && row[dwzIndex]) ? parseInt((row[dwzIndex] || '').trim(), 10) : NaN;
           const dateObj = parseDateString(dateStr || '');
-          if (dateObj && !isNaN(dwzValue)) {
+          if (dateObj instanceof Date && !isNaN(dateObj) && !isNaN(dwzValue)) {
             chartPoints.push({ x: dateObj, y: dwzValue });
           }
         });
 
         table.appendChild(thead);
         table.appendChild(tbody);
-        playerSection.innerHTML = `<h2>${playerName}</h2>`;
-        playerSection.appendChild(table);
+  // Avoid inserting untrusted HTML into innerHTML; use textContent instead
+  playerSection.innerHTML = '';
+  const h2 = document.createElement('h2');
+  h2.textContent = playerName;
+  playerSection.appendChild(h2);
+  playerSection.appendChild(table);
 
         chartPoints.sort((a, b) => a.x - b.x);
 
@@ -224,7 +259,14 @@
         return { pkz, playerName, data: chartPoints, color };
 
       } catch (err) {
-        playerSection.innerHTML = `<h2>Spieler ${pkz}</h2><p style="color:red;">Fehler: ${err.message}</p>`;
+        playerSection.innerHTML = '';
+        const h = document.createElement('h2');
+        h.textContent = `Spieler ${pkz}`;
+        const p = document.createElement('p');
+        p.style.color = 'red';
+        p.textContent = `Fehler: ${err.message}`;
+        playerSection.appendChild(h);
+        playerSection.appendChild(p);
         console.error(err);
         return null;
       }
