@@ -167,6 +167,7 @@
 
     // Previous player input key + helpers
     const PREV_INPUT_KEY = 'ch_prev_pkz_v1';
+    const AGE_ADJUST_KEY = 'ch_age_adjust_v1';
     function loadPreviousInput() {
       try { return localStorage.getItem(PREV_INPUT_KEY) || ''; }
       catch (e) { return ''; }
@@ -174,6 +175,15 @@
     function savePreviousInput(value) {
       try { localStorage.setItem(PREV_INPUT_KEY, value || ''); }
       catch (e) { /* ignore storage errors */ }
+    }
+
+    function loadAgeAdjust() {
+      try { return localStorage.getItem(AGE_ADJUST_KEY) === '1'; }
+      catch (e) { return false; }
+    }
+    function saveAgeAdjust(v) {
+      try { localStorage.setItem(AGE_ADJUST_KEY, v ? '1' : '0'); }
+      catch (e) { /* ignore */ }
     }
 
     function loadTournamentCache() {
@@ -188,6 +198,9 @@
     try {
       const prev = loadPreviousInput();
       if (prev) document.getElementById('pkz').value = prev;
+      // restore saved age-adjust checkbox state
+      const cb = document.getElementById('ageAdjustCheckbox');
+      if (cb) cb.checked = loadAgeAdjust();
     } catch (e) { /* ignore */ }
 
     // In-memory shared cache for the current run to avoid localStorage race overwrites
@@ -569,9 +582,14 @@
     });
 
     // Re-render when age-adjust checkbox changes
-    document.getElementById('ageAdjustCheckbox').addEventListener('change', () => {
-      if (lastPlayers) renderChartFromPlayers(lastPlayers);
-    });
+    (function() {
+      const cb = document.getElementById('ageAdjustCheckbox');
+      if (!cb) return;
+      cb.addEventListener('change', () => {
+        saveAgeAdjust(cb.checked);
+        if (lastPlayers) renderChartFromPlayers(lastPlayers);
+      });
+    })();
   </script>
 </body>
 
