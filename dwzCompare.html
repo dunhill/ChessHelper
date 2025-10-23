@@ -168,6 +168,19 @@
     // Previous player input key + helpers
     const PREV_INPUT_KEY = 'ch_prev_pkz_v1';
     const AGE_ADJUST_KEY = 'ch_age_adjust_v1';
+    const PKZ_YEAR_CACHE_KEY = 'ch_pkz_years_v1';
+    // load/save helpers for pkz -> birth year cache
+    function loadPkzYearCache() {
+      try { return JSON.parse(localStorage.getItem(PKZ_YEAR_CACHE_KEY) || '{}'); }
+      catch (e) { return {}; }
+    }
+    function savePkzYearCache(cache) {
+      try { localStorage.setItem(PKZ_YEAR_CACHE_KEY, JSON.stringify(cache)); }
+      catch (e) { /* ignore */ }
+    }
+    // in-memory pkz->year cache for the current run
+    let inMemoryPkzYearCache = null;
+
     function loadPreviousInput() {
       try { return localStorage.getItem(PREV_INPUT_KEY) || ''; }
       catch (e) { return ''; }
@@ -317,8 +330,9 @@
     }
 
     async function fetchPlayerData(pkz, color) {
-      // ensure run-local cache exists (in case fetchTournamentDate wasn't called yet)
+      // ensure run-local caches exist (in case fetchTournamentDate wasn't called yet)
       if (!inMemoryTournamentCache) inMemoryTournamentCache = loadTournamentCache();
+      if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
 
        const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
        const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
@@ -345,10 +359,22 @@
         const fideMatch = fideRaw ? fideRaw.match(/\d+/) : null;
         const fideId = fideMatch ? fideMatch[0] : '';
 
-        // Try to load FIDE year of birth (best-effort; may be null)
+        // Try to load year of birth from pkz->year cache first.
         let fideYear = null;
-        if (fideId) {
-          try { fideYear = await fetchFideBirthYear(fideId); } catch (e) { fideYear = null; }
+        const pkzKey = (pkz || '').toString().trim();
+        if (pkzKey && Object.prototype.hasOwnProperty.call(inMemoryPkzYearCache, pkzKey)) {
+          fideYear = inMemoryPkzYearCache[pkzKey]; // may be null
+        } else if (fideId) {
+          // not cached for this pkz -> fetch via FIDE id and store mapping pkz -> year
+          try {
+            fideYear = await fetchFideBirthYear(fideId);
+          } catch (e) {
+            fideYear = null;
+          }
+          // cache mapping (store even if null to avoid re-fetch)
+          if (pkzKey) {
+            inMemoryPkzYearCache[pkzKey] = fideYear === undefined ? null : fideYear;
+          }
         }
 
         // include FIDE id and birth year (if available) in the displayed title
@@ -468,6 +494,7 @@
         // This avoids races where parallel fetchTournamentDate calls repeatedly
         // read/update localStorage and overwrite each other.
         try { saveTournamentCache(inMemoryTournamentCache); } catch (e) { /* ignore */ }
+        try { if (inMemoryPkzYearCache) savePkzYearCache(inMemoryPkzYearCache); } catch (e) { /* ignore */ }
 
          // return fideYear as well for age-adjustment logic
          return { pkz, playerName, data: chartPoints, color, fideYear };
