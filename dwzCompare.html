@@ -102,6 +102,11 @@
 
   <div id="playersContainer"></div>
 
+  <!-- Age adjustment toggle -->
+  <div style="margin-top:12px;">
+    <label><input type="checkbox" id="ageAdjustCheckbox"> Altersanpassung aktiv</label>
+  </div>
+
   <div id="chartContainer">
     <canvas id="dwzChart" width="800" height="400"></canvas>
   </div>
@@ -156,6 +161,9 @@
     let inMemoryTournamentCache = null;
     // pending fetch promises to deduplicate simultaneous remote lookups for same code
     const pendingTournamentFetches = {};
+
+    // last fetched players for re-rendering when checkbox changes
+    let lastPlayers = null;
 
     // Visual cache counters + updater
     let cacheHits = 0;
@@ -412,7 +420,8 @@
         // read/update localStorage and overwrite each other.
         try { saveTournamentCache(inMemoryTournamentCache); } catch (e) { /* ignore */ }
 
-         return { pkz, playerName, data: chartPoints, color };
+         // return fideYear as well for age-adjustment logic
+         return { pkz, playerName, data: chartPoints, color, fideYear };
 
        } catch (err) {
         playerSection.innerHTML = '';
@@ -429,6 +438,65 @@
       }
     }
 
+    // Build datasets (with optional age-adjust) and render chart for given players
+    function renderChartFromPlayers(players) {
+      const chartCanvas = document.getElementById('dwzChart');
+      if (chartCanvas.chart) chartCanvas.chart.destroy();
+      if (!players || players.length === 0) return;
+
+      let ageAdjust = !!document.getElementById('ageAdjustCheckbox').checked;
+      let firstYear = null;
+      if (ageAdjust) {
+        firstYear = players[0].fideYear ? parseInt(players[0].fideYear, 10) : null;
+        if (!firstYear) {
+          console.warn('Altersanpassung aktiviert, aber Geburtsjahr des ersten Spielers fehlt. Anpassung wird übersprungen.');
+          ageAdjust = false;
+        }
+      }
+
+      const datasets = players.map((p, idx) => {
+        let data = (p.data || []).map(pt => ({ x: new Date(pt.x.getTime()), y: pt.y }));
+
+        if (ageAdjust && idx !== 0) {
+          const otherYear = p.fideYear ? parseInt(p.fideYear, 10) : null;
+          if (otherYear) {
+            const shift = firstYear - otherYear; // add difference in years
+            data = data.map(pt => {
+              const d = new Date(pt.x.getTime());
+              d.setFullYear(d.getFullYear() + shift);
+              return { x: d, y: pt.y };
+            });
+          } else {
+            console.warn(`Geburtsjahr für ${p.playerName} fehlt; Anpassung übersprungen.`);
+          }
+        }
+
+        return {
+          label: p.playerName,
+          data,
+          borderColor: p.color,
+          backgroundColor: p.color + '33',
+          fill: false,
+          tension: 0.3
+        };
+      }).filter(ds => ds.data && ds.data.length > 0);
+
+      if (datasets.length === 0) return;
+
+      chartCanvas.chart = new Chart(chartCanvas, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true, position: 'bottom' } },
+          scales: {
+            x: { type: 'time', time: { unit: 'day', tooltipFormat: 'dd.MM.yyyy' }, title: { display: true, text: 'Turnierdatum' } },
+            y: { title: { display: true, text: 'DWZneu' }, beginAtZero: false }
+          }
+        }
+      });
+    }
+
     document.getElementById('fetchBtn').addEventListener('click', async () => {
        // reset cache visual counters on each new run so the widget reflects this run
        cacheHits = 0;
@@ -443,53 +511,30 @@
        const ids = input.split(',').map(x => x.trim()).filter(Boolean);
        const container = document.getElementById('playersContainer');
        container.innerHTML = '';
-       const chartCanvas = document.getElementById('dwzChart');
-       if (chartCanvas.chart) chartCanvas.chart.destroy();
 
        if (ids.length === 0) {
          container.innerHTML = '<p style="color:red;">Bitte mindestens eine Spieler-ID angeben.</p>';
          return;
        }
 
-       const datasets = [];
+       // Fetch all players first (keeps original order)
+       const players = [];
        for (let i = 0; i < ids.length; i++) {
          const color = chartColors[i % chartColors.length];
          const playerData = await fetchPlayerData(ids[i], color);
-         if (playerData && playerData.data.length > 0) {
-           datasets.push({
-             label: playerData.playerName,
-             data: playerData.data,
-             borderColor: playerData.color,
-             backgroundColor: playerData.color + '33',
-             fill: false,
-             tension: 0.3
-           });
-         }
+         if (playerData) players.push(playerData);
        }
 
-       if (datasets.length === 0) return;
+       if (players.length === 0) return;
 
-       chartCanvas.chart = new Chart(chartCanvas, {
-         type: 'line',
-         data: { datasets },
-         options: {
-           responsive: true,
-           plugins: {
-             legend: { display: true, position: 'bottom' }
-           },
-           scales: {
-             x: {
-               type: 'time',
-               time: { unit: 'day', tooltipFormat: 'dd.MM.yyyy' },
-               title: { display: true, text: 'Turnierdatum' }
-             },
-             y: {
-               title: { display: true, text: 'DWZneu' },
-               beginAtZero: false
-             }
-           }
-         }
-       });
+       // store players and render chart (render will respect checkbox state)
+       lastPlayers = players;
+       renderChartFromPlayers(players);
+    });
+
+    // Re-render when age-adjust checkbox changes
+    document.getElementById('ageAdjustCheckbox').addEventListener('change', () => {
+      if (lastPlayers) renderChartFromPlayers(lastPlayers);
     });
   </script>
 </body>
