@@ -337,19 +337,19 @@
       if (!inMemoryTournamentCache) inMemoryTournamentCache = loadTournamentCache();
       if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
 
-       const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-       const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-   const playerSection = document.createElement('div');
-   playerSection.className = 'player-section';
-   const loadingH2 = document.createElement('h2');
-   loadingH2.textContent = `Spieler ${pkz}`;
-   const loadingP = document.createElement('p');
-   loadingP.textContent = 'Lade Daten...';
-   playerSection.appendChild(loadingH2);
-   playerSection.appendChild(loadingP);
-       document.getElementById('playersContainer').appendChild(playerSection);
+      const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
+      const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const playerSection = document.createElement('div');
+      playerSection.className = 'player-section';
+      const loadingH2 = document.createElement('h2');
+      loadingH2.textContent = `Spieler ${pkz}`;
+      const loadingP = document.createElement('p');
+      loadingP.textContent = 'Lade Daten...';
+      playerSection.appendChild(loadingH2);
+      playerSection.appendChild(loadingP);
+      document.getElementById('playersContainer').appendChild(playerSection);
 
-       try {
+      try {
         const response = await fetch(corsUrl);
         if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
         const csv = await response.text();
@@ -401,8 +401,8 @@
           return null;
         }
 
-  const headers = rows[headerIndex] || [];
-  const dataRows = rows.slice(headerIndex + 1); // keep all data rows
+        const headers = rows[headerIndex] || [];
+        const dataRows = rows.slice(headerIndex + 1); // keep all data rows
 
         if (dataRows.length === 0) {
           playerSection.innerHTML = '';
@@ -482,12 +482,12 @@
 
         table.appendChild(thead);
         table.appendChild(tbody);
-  // Avoid inserting untrusted HTML into innerHTML; use textContent instead
-  playerSection.innerHTML = '';
-  const h2 = document.createElement('h2');
-  h2.textContent = playerTitle;
-  playerSection.appendChild(h2);
-  playerSection.appendChild(table);
+        // Avoid inserting untrusted HTML into innerHTML; use textContent instead
+        playerSection.innerHTML = '';
+        const h2 = document.createElement('h2');
+        h2.textContent = playerTitle;
+        playerSection.appendChild(h2);
+        playerSection.appendChild(table);
 
         chartPoints.sort((a, b) => a.x - b.x);
 
@@ -499,10 +499,10 @@
         try { saveTournamentCache(inMemoryTournamentCache); } catch (e) { /* ignore */ }
         try { if (inMemoryPkzYearCache) savePkzYearCache(inMemoryPkzYearCache); } catch (e) { /* ignore */ }
 
-         // return fideYear as well for age-adjustment logic
-         return { pkz, playerName, data: chartPoints, color, fideYear };
+        // return fideYear as well for age-adjustment logic
+        return { pkz, playerName, data: chartPoints, color, fideYear };
 
-       } catch (err) {
+      } catch (err) {
         playerSection.innerHTML = '';
         const h = document.createElement('h2');
         // If we have the parsed playerName/yob, show it; otherwise fallback to pkz
@@ -615,44 +615,44 @@
     }
 
     document.getElementById('fetchBtn').addEventListener('click', async () => {
-       // reset cache visual counters on each new run so the widget reflects this run
-       cacheHits = 0;
-       cacheMisses = 0;
-       // initialize run-local cache from localStorage once
-       inMemoryTournamentCache = loadTournamentCache();
-       updateCacheStatus();
+      // reset cache visual counters on each new run so the widget reflects this run
+      cacheHits = 0;
+      cacheMisses = 0;
+      // initialize run-local cache from localStorage once
+      inMemoryTournamentCache = loadTournamentCache();
+      updateCacheStatus();
 
-       const input = document.getElementById('pkz').value.trim();
-       // remember last-used player list
-       savePreviousInput(input);
-       const ids = input.split(',').map(x => x.trim()).filter(Boolean);
-       const container = document.getElementById('playersContainer');
-       container.innerHTML = '';
+      const input = document.getElementById('pkz').value.trim();
+      // remember last-used player list
+      savePreviousInput(input);
+      const ids = input.split(',').map(x => x.trim()).filter(Boolean);
+      const container = document.getElementById('playersContainer');
+      container.innerHTML = '';
 
-       if (ids.length === 0) {
-         container.innerHTML = '<p style="color:red;">Bitte mindestens eine Spieler-ID angeben.</p>';
-         return;
-       }
+      if (ids.length === 0) {
+        container.innerHTML = '<p style="color:red;">Bitte mindestens eine Spieler-ID angeben.</p>';
+        return;
+      }
 
-       // Fetch all players first (keeps original order)
-       const players = [];
-       for (let i = 0; i < ids.length; i++) {
-         const color = chartColors[i % chartColors.length];
-         const playerData = await fetchPlayerData(ids[i], color);
-         if (playerData) players.push(playerData);
-       }
+      // Fetch all players first (keeps original order)
+      const players = [];
+      for (let i = 0; i < ids.length; i++) {
+        const color = chartColors[i % chartColors.length];
+        const playerData = await fetchPlayerData(ids[i], color);
+        if (playerData) players.push(playerData);
+      }
 
-       if (players.length === 0) return;
+      if (players.length === 0) return;
 
-       // store players and render chart (render will respect checkbox state)
-       lastPlayers = players;
-       // create per-player toggles (all checked by default)
-       buildPlayerToggles(players);
-       renderChartFromPlayers(players);
+      // store players and render chart (render will respect checkbox state)
+      lastPlayers = players;
+      // create per-player toggles (all checked by default)
+      buildPlayerToggles(players);
+      renderChartFromPlayers(players);
     });
 
     // Re-render when age-adjust checkbox changes
-    (function() {
+    (function () {
       const cb = document.getElementById('ageAdjustCheckbox');
       if (!cb) return;
       cb.addEventListener('change', () => {
