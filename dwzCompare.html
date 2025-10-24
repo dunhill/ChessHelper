@@ -132,6 +132,13 @@
   <h1>DWZ-Verlauf mehrerer Spieler</h1>
   <label for="pkz">Spieler-IDs (kommagetrennt):</label>
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
+
+  <!-- Months control: number of months to load (0 = all). Default 12 -->
+  <div style="margin-top:8px; max-width:320px;">
+    <label for="months">Zeitraum (Monate, 0 = alle):</label>
+    <input type="number" id="months" min="0" step="1" value="12" style="width:100%; font-size:1rem; padding:6px;">
+  </div>
+
   <button id="fetchBtn">Daten abrufen</button>
 
   <!-- Chart and controls moved above the player tables -->
@@ -172,6 +179,7 @@
     const PREV_INPUT_KEY = 'ch_prev_pkz_v1';
     const AGE_ADJUST_KEY = 'ch_age_adjust_v1';
     const PKZ_YEAR_CACHE_KEY = 'ch_pkz_years_v1';
+    const MONTHS_KEY = 'ch_months_v1';
     // load/save helpers for pkz -> birth year cache
     function loadPkzYearCache() {
       try { return JSON.parse(localStorage.getItem(PKZ_YEAR_CACHE_KEY) || '{}'); }
@@ -202,6 +210,15 @@
       catch (e) { /* ignore */ }
     }
 
+    function loadMonths() {
+      try { const v = parseInt(localStorage.getItem(MONTHS_KEY), 10); return isNaN(v) ? 12 : v; }
+      catch (e) { return 12; }
+    }
+    function saveMonths(v) {
+      try { localStorage.setItem(MONTHS_KEY, (Number.isFinite(v) ? String(v) : '12')); }
+      catch (e) { /* ignore */ }
+    }
+
     function loadTournamentCache() {
       try { return JSON.parse(localStorage.getItem(TOURNAMENT_CACHE_KEY) || '{}'); }
       catch (e) { return {}; }
@@ -217,6 +234,9 @@
       // restore saved age-adjust checkbox state
       const cb = document.getElementById('ageAdjustCheckbox');
       if (cb) cb.checked = loadAgeAdjust();
+      // restore months value
+      const monthsEl = document.getElementById('months');
+      if (monthsEl) monthsEl.value = loadMonths();
     } catch (e) { /* ignore */ }
 
     // In-memory shared cache for the current run to avoid localStorage race overwrites
@@ -332,7 +352,8 @@
       return new Date(year, month - 1, day);
     }
 
-    async function fetchPlayerData(pkz, color) {
+    // now accepts cutoffDate: null = load all tournaments; Date = cutoff to stop fetching older tournaments
+    async function fetchPlayerData(pkz, color, cutoffDate) {
       // ensure run-local caches exist (in case fetchTournamentDate wasn't called yet)
       if (!inMemoryTournamentCache) inMemoryTournamentCache = loadTournamentCache();
       if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
@@ -421,10 +442,52 @@
         // ✅ Collect tournament codes
         const tournaments = dataRows.map(r => r[0]?.trim()).filter(Boolean);
 
-        // ✅ Fetch tournament dates in parallel
-        const dateResults = await Promise.allSettled(
-          tournaments.map(code => fetchTournamentDate(code))
-        );
+        const dateMap = {}; // map original dataRows index -> date string (or null)
+
+        if (!cutoffDate) {
+          // load all tournament dates in parallel (existing behavior)
+          const dateResults = await Promise.allSettled(
+            tournaments.map(code => fetchTournamentDate(code))
+          );
+          // Build list of tournament codes with their original dataRows index so
+          // the dateResults can be mapped back to the correct row even if some
+          // codes are missing/empty.
+          const tournamentsWithIndex = dataRows
+            .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
+            .filter(t => t.code);
+          dateResults.forEach((res, i) => {
+            const info = tournamentsWithIndex[i];
+            if (!info) return;
+            dateMap[info.idx] = res.status === 'fulfilled' ? res.value : null;
+          });
+        } else {
+          // cutoffDate provided -> load from last tournament backwards until we find a date older than cutoffDate
+          // Build list of tournament codes with their original dataRows index
+          const tournamentsWithIndex = dataRows
+            .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
+            .filter(t => t.code);
+
+          // iterate from last to first and fetch sequentially, stop when older than cutoff is reached
+          for (let k = tournamentsWithIndex.length - 1; k >= 0; k--) {
+            const info = tournamentsWithIndex[k];
+            const code = info.code;
+            try {
+              const dateStr = await fetchTournamentDate(code); // may be null
+              dateMap[info.idx] = dateStr;
+              // if we have a valid parsed date and it's older than cutoffDate -> keep it and stop
+              if (dateStr) {
+                const dt = parseDateString(dateStr);
+                if (dt instanceof Date && !isNaN(dt) && dt < cutoffDate) {
+                  break;
+                }
+              }
+              // if dateStr is null/unknown, continue fetching earlier tournaments (we can't decide)
+            } catch (e) {
+              // on error, mark as null and continue
+              dateMap[info.idx] = null;
+            }
+          }
+        }
 
         // ✅ Build table
         const table = document.createElement('table');
@@ -444,21 +507,6 @@
 
         const chartPoints = [];
 
-        // Build list of tournament codes with their original dataRows index so
-        // the dateResults can be mapped back to the correct row even if some
-        // codes are missing/empty.
-        const tournamentsWithIndex = dataRows
-          .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
-          .filter(t => t.code);
-
-        // Map settled results back to original row indices
-        const dateMap = {};
-        dateResults.forEach((res, i) => {
-          const info = tournamentsWithIndex[i];
-          if (!info) return;
-          dateMap[info.idx] = res.status === 'fulfilled' ? res.value : null;
-        });
-
         dataRows.forEach((row, i) => {
           const tr = document.createElement('tr');
           (row || []).forEach(cell => {
@@ -467,9 +515,11 @@
             tr.appendChild(td);
           });
 
-          const dateStr = dateMap[i] || null;
+          // if dateMap has no key for this index it means we did not fetch that tournament (months limiting)
+          const hasFetched = Object.prototype.hasOwnProperty.call(dateMap, i);
+          const dateStr = hasFetched ? dateMap[i] : undefined;
           const dateTd = document.createElement('td');
-          dateTd.textContent = dateStr || 'Unbekannt';
+          dateTd.textContent = dateStr === undefined ? 'Nicht geladen' : (dateStr || 'Unbekannt');
           tr.appendChild(dateTd);
           tbody.appendChild(tr);
 
@@ -622,6 +672,19 @@
       inMemoryTournamentCache = loadTournamentCache();
       updateCacheStatus();
 
+      // read and persist months setting and compute a single cutoffDate (null = load all)
+      const monthsEl = document.getElementById('months');
+      const months = monthsEl ? parseInt(monthsEl.value, 10) || 0 : 12;
+      saveMonths(Number.isFinite(months) ? months : 12);
+      let cutoffDate = null;
+      if (months && Number(months) > 0) {
+        cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() - Number(months));
+        console.log(`Global cutoff: ${cutoffDate.toISOString()} (months=${months})`);
+      } else {
+        console.log('Global cutoff: none (load all tournaments)');
+      }
+
       const input = document.getElementById('pkz').value.trim();
       // remember last-used player list
       savePreviousInput(input);
@@ -638,7 +701,7 @@
       const players = [];
       for (let i = 0; i < ids.length; i++) {
         const color = chartColors[i % chartColors.length];
-        const playerData = await fetchPlayerData(ids[i], color);
+        const playerData = await fetchPlayerData(ids[i], color, cutoffDate);
         if (playerData) players.push(playerData);
       }
 
