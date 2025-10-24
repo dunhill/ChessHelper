@@ -143,6 +143,9 @@
     <div id="chartContainer">
       <canvas id="dwzChart" width="800" height="400"></canvas>
     </div>
+
+    <!-- Player visibility toggles (populated at runtime) -->
+    <div id="playerToggles" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
   </div>
 
   <div id="playersContainer"></div>
@@ -514,11 +517,47 @@
       }
     }
 
+    // Build per-player visibility checkboxes under the chart.
+    function buildPlayerToggles(players) {
+      const container = document.getElementById('playerToggles');
+      if (!container) return;
+      container.innerHTML = '';
+      players.forEach((p, idx) => {
+        const key = `playerToggle_${idx}_${p.pkz || idx}`;
+        const label = document.createElement('label');
+        label.style.display = 'inline-flex';
+        label.style.alignItems = 'center';
+        label.style.gap = '6px';
+        label.style.marginRight = '8px';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = key;
+        cb.dataset.idx = idx;
+        cb.checked = true; // default enabled
+        cb.addEventListener('change', () => {
+          // simply re-render using current lastPlayers - data already loaded
+          if (lastPlayers) renderChartFromPlayers(lastPlayers);
+        });
+        const txt = document.createElement('span');
+        txt.textContent = p.playerName || (`Spieler ${p.pkz || idx}`);
+        label.appendChild(cb);
+        label.appendChild(txt);
+        container.appendChild(label);
+      });
+    }
+
     // Build datasets (with optional age-adjust) and render chart for given players
     function renderChartFromPlayers(players) {
       const chartCanvas = document.getElementById('dwzChart');
       if (chartCanvas.chart) chartCanvas.chart.destroy();
       if (!players || players.length === 0) return;
+
+      // determine visibility from toggles (default visible)
+      const visibility = players.map((p, idx) => {
+        const id = `playerToggle_${idx}_${p.pkz || idx}`;
+        const el = document.getElementById(id);
+        return el ? !!el.checked : true;
+      });
 
       let ageAdjust = !!document.getElementById('ageAdjustCheckbox').checked;
       let firstYear = null;
@@ -547,6 +586,8 @@
           }
         }
 
+        // respect visibility toggles: skip datasets when unchecked
+        if (!visibility[idx]) return null;
         return {
           label: p.playerName,
           data,
@@ -555,7 +596,7 @@
           fill: false,
           tension: 0.3
         };
-      }).filter(ds => ds.data && ds.data.length > 0);
+      }).filter(Boolean).filter(ds => ds.data && ds.data.length > 0);
 
       if (datasets.length === 0) return;
 
@@ -605,6 +646,8 @@
 
        // store players and render chart (render will respect checkbox state)
        lastPlayers = players;
+       // create per-player toggles (all checked by default)
+       buildPlayerToggles(players);
        renderChartFromPlayers(players);
     });
 
