@@ -136,16 +136,16 @@
 
   <!-- Chart and controls moved above the player tables -->
   <div id="chartArea">
-    <div class="chart-controls">
-      <label for="ageAdjustCheckbox"><input type="checkbox" id="ageAdjustCheckbox"> Altersanpassung</label>
-    </div>
-
     <div id="chartContainer">
       <canvas id="dwzChart" width="800" height="400"></canvas>
     </div>
 
     <!-- Player visibility toggles (populated at runtime) -->
     <div id="playerToggles" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+
+    <div class="chart-controls">
+      <label for="ageAdjustCheckbox"><input type="checkbox" id="ageAdjustCheckbox"> Altersanpassung</label>
+    </div>
   </div>
 
   <div id="playersContainer"></div>
