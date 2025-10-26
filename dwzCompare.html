@@ -125,12 +125,57 @@
       font-size: 14px;
       color: #222;
     }
+
+    /* Modal for Add top players */
+    #topPlayersModalOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+
+    #topPlayersModal {
+      background: #fff;
+      padding: 16px;
+      border-radius: 6px;
+      width: 360px;
+      max-width: calc(100% - 32px);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    #topPlayersModal label {
+      display: block;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    #topPlayersModal input,
+    #topPlayersModal select {
+      width: 100%;
+      padding: 6px;
+      margin-top: 4px;
+      box-sizing: border-box;
+    }
+
+    #topPlayersModal .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 12px;
+    }
   </style>
 </head>
 
 <body>
   <h1>DWZ-Verlauf mehrerer Spieler</h1>
-  <label for="pkz">Spieler-IDs (kommagetrennt):</label>
+
+  <div style="display:flex; align-items:center; gap:8px;">
+    <label for="pkz" style="margin-right:6px;">Spieler-IDs (kommagetrennt):</label>
+    <a id="addTopPlayersLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
+  </div>
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
 
   <!-- Months control: number of months to load (0 = all). Default 12 -->
@@ -159,6 +204,40 @@
 
   <!-- Visual cache status (updated at runtime) -->
   <div id="cacheStatus" aria-live="polite" title="Cache-Treffer / -Fehler">Cache: Hits 0 · Misses 0</div>
+
+  <!-- Top players modal -->
+  <div id="topPlayersModalOverlay" role="dialog" aria-modal="true">
+    <div id="topPlayersModal" role="document">
+      <h3 style="margin:0 0 8px 0; font-size:1.05rem;">Add top players</h3>
+      <label for="topLand">Land (optional)</label>
+      <select id="topLand">
+        <!-- only two supported options: whole Germany (000) or Berlin (300) -->
+        <option value="000">Deutschland (gesamt)</option>
+        <option value="300">Berlin</option>
+      </select>
+
+      <label for="topMinAge">Min Alter</label>
+      <input id="topMinAge" type="number" min="0" placeholder="z. B. 18">
+
+      <label for="topMaxAge">Max Alter</label>
+      <input id="topMaxAge" type="number" min="0" placeholder="z. B. 99">
+
+      <label for="topSex">Geschlecht</label>
+      <select id="topSex">
+        <option value="both">beide</option>
+        <option value="male">männlich</option>
+        <option value="female">weiblich</option>
+      </select>
+
+      <label for="topMaxCount">Max. Anzahl Spieler</label>
+      <input id="topMaxCount" type="number" min="1" value="10">
+
+      <div class="modal-actions">
+        <button id="topPlayersCancel" type="button">Abbrechen</button>
+        <button id="topPlayersAdd" type="button">Add</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Chart.js + Luxon for time axis -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -722,6 +801,127 @@
         saveAgeAdjust(cb.checked);
         if (lastPlayers) renderChartFromPlayers(lastPlayers);
       });
+    })();
+
+    // === Add top-players modal handling ===
+    (function () {
+      const addTopPlayersLink = document.getElementById('addTopPlayersLink');
+      const overlay = document.getElementById('topPlayersModalOverlay');
+      const cancelBtn = document.getElementById('topPlayersCancel');
+      const addBtn = document.getElementById('topPlayersAdd');
+      const pkzInput = document.getElementById('pkz');
+
+      if (!overlay) return; // modal not present -> nothing to do
+
+      // Open modal when link is clicked
+      if (addTopPlayersLink) {
+        addTopPlayersLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          overlay.style.display = 'flex';
+          // focus first focusable element inside modal for accessibility
+          const first = overlay.querySelector('select, input, button');
+          if (first) first.focus();
+        });
+      }
+
+      // Close modal when Cancel clicked
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+          overlay.style.display = 'none';
+          if (addTopPlayersLink) addTopPlayersLink.focus();
+        });
+      }
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (addTopPlayersLink) addTopPlayersLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (addTopPlayersLink) addTopPlayersLink.focus();
+        }
+      });
+
+      // Minimal Add button behavior: close and focus PKZ input (extend later to populate IDs)
+      if (addBtn) {
+        addBtn.addEventListener('click', async () => {
+          // read modal values
+          const count = (document.getElementById('topMaxCount')?.value || '').trim();
+          const sexSel = (document.getElementById('topSex')?.value || 'both').trim();
+          const minAge = (document.getElementById('topMinAge')?.value || '').trim();
+          const maxAge = (document.getElementById('topMaxAge')?.value || '').trim();
+          const land = (document.getElementById('topLand')?.value || '000').trim(); // '000' or '300'
+
+          // map sex to expected param values (male -> m, female -> w), omit for 'both'
+          let sexParam = '';
+          if (sexSel === 'male') sexParam = 'm';
+          else if (sexSel === 'female') sexParam = 'w';
+
+          // build query params
+          const params = [];
+          if (count) params.push(`toplist=${encodeURIComponent(count)}`);
+          if (sexParam) params.push(`sex=${encodeURIComponent(sexParam)}`);
+          if (minAge) params.push(`age_from=${encodeURIComponent(minAge)}`);
+          if (maxAge) params.push(`age_to=${encodeURIComponent(maxAge)}`);
+
+          const base = `https://www.schachbund.de/verband/${encodeURIComponent(land)}.html`;
+          const url = params.length ? `${base}?${params.join('&')}` : base;
+
+          try {
+            // fetch content via cors proxy and parse it
+            const resp = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const html = await resp.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            const table = doc.getElementById('dewisTable');
+            if (!table) {
+              alert('Keine Spieler-Tabelle (dewisTable) gefunden.');
+              overlay.style.display = 'none';
+              if (addTopPlayersLink) addTopPlayersLink.focus();
+              return;
+            }
+
+            const rows = Array.from(table.querySelectorAll('tr'));
+            const names = [];
+            for (const row of rows) {
+              const cell = row.querySelector('td.col_2');
+              if (!cell) continue;
+              // player name is directly in the .col_2 cell
+              const name = (cell.textContent || '').trim();
+              if (name) names.push(name);
+            }
+
+            // print fetched player names to the browser console (one per line + summary)
+            if (names.length > 0) {
+              console.log(`Top players fetched (${names.length}):`);
+              names.forEach((n, i) => console.log(`${i + 1}. ${n}`));
+            } else {
+              console.log('No player names found in dewisTable rows.');
+            }
+
+            if (names.length === 0) {
+              alert('Keine Spieler-Links gefunden.');
+            } else {
+              const pkzInput = document.getElementById('pkz');
+              if (pkzInput) pkzInput.value = names.join(',');
+            }
+          } catch (err) {
+            console.error('Fehler beim Laden der Topliste:', err);
+            alert('Fehler beim Laden der Topliste. Details in Konsole.');
+          } finally {
+            overlay.style.display = 'none';
+            if (addTopPlayersLink) addTopPlayersLink.focus();
+          }
+        });
+      }
     })();
   </script>
 </body>
