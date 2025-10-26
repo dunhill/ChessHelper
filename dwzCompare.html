@@ -250,6 +250,152 @@
       '#ff9800', '#00bcd4', '#e91e63', '#795548'
     ];
 
+    // --- Spieler CSV loader (load once, keep mapping name->ID in memory) ---
+    // ID is column 0, Spielername is column 4 (0-based indices). The CSV is
+    // large; we keep the map in memory for the runtime. We key by a
+    // normalized lowercase name (remove spaces after commas etc.) to match
+    // names scraped from the website.
+    let spielerNameToIdMap = null;
+    let spielerCsvLoadPromise = null;
+
+    function normalizeSpielerName(s) {
+      if (!s) return '';
+      // collapse whitespace, remove spaces after commas, trim and lowercase
+      return s.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+    }
+
+    async function loadSpielerCsv() {
+      if (spielerNameToIdMap) return spielerNameToIdMap;
+      if (spielerCsvLoadPromise) return spielerCsvLoadPromise;
+
+      // start loading and store promise to deduplicate concurrent requests
+      spielerCsvLoadPromise = (async () => {
+        // Try fetching the CSV from the server first. If that fails (for
+        // example when the page is opened via file:// and fetch is blocked),
+        // fall back to prompting the user to select the CSV file via a file
+        // picker and read it locally.
+        try {
+          let text = null;
+          try {
+            const resp = await fetch('spieler.csv');
+            if (resp && resp.ok) {
+              text = await resp.text();
+            } else {
+              // treat non-ok like failure and fall through to file picker
+              console.warn('spieler.csv fetch failed or returned non-ok response; falling back to file picker.');
+            }
+          } catch (fetchErr) {
+            console.warn('Fetch spieler.csv failed (likely due to file:// CORS). Falling back to file picker.', fetchErr);
+          }
+
+          if (text === null) {
+            // prompt user to choose the CSV file from disk
+            text = await promptLoadSpielerCsvFile();
+            if (!text) {
+              // user cancelled or file empty -> return empty map
+              spielerNameToIdMap = new Map();
+              return spielerNameToIdMap;
+            }
+          }
+
+          const lines = text.split(/\r?\n/);
+          const map = new Map();
+          // skip header if present
+          let startIdx = 0;
+          if (lines.length && lines[0].toLowerCase().includes('spielername')) startIdx = 1;
+
+          // simple CSV parsing that handles quoted fields with commas
+          for (let i = startIdx; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line) continue;
+            const fields = parseCsvLine(line);
+            if (!fields || fields.length < 5) continue;
+            const id = (fields[0] || '').trim();
+            let name = (fields[4] || '').trim();
+            // strip surrounding quotes if any
+            if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1);
+            const key = normalizeSpielerName(name);
+            if (key && id) {
+              // prefer first occurrence; duplicates typically have same ID
+              if (!map.has(key)) map.set(key, id);
+            }
+          }
+          spielerNameToIdMap = map;
+          return map;
+        } catch (err) {
+          console.error('Error loading spieler.csv', err);
+          spielerNameToIdMap = new Map();
+          return spielerNameToIdMap;
+        }
+      })();
+
+      return spielerCsvLoadPromise;
+    }
+
+    // parse a CSV line into fields, handling quoted fields containing commas
+    function parseCsvLine(line) {
+      const res = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          // toggle quote state. Handle double quotes inside quoted fields.
+          if (inQuotes && line[i + 1] === '"') {
+            cur += '"';
+            i++; // skip escaped quote
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          res.push(cur);
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      res.push(cur);
+      return res;
+    }
+
+    // Prompt the user to select the local `spieler.csv` file and return its text.
+    // Returns null if the user cancels.
+    function promptLoadSpielerCsvFile() {
+      return new Promise((resolve) => {
+        try {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.csv,text/csv';
+          input.style.display = 'none';
+          document.body.appendChild(input);
+          input.addEventListener('change', () => {
+            const file = input.files && input.files[0];
+            if (!file) {
+              document.body.removeChild(input);
+              resolve(null);
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+              document.body.removeChild(input);
+              resolve(reader.result || '');
+            };
+            reader.onerror = () => {
+              document.body.removeChild(input);
+              console.error('Error reading selected spieler.csv file');
+              resolve(null);
+            };
+            reader.readAsText(file, 'utf-8');
+          }, { once: true });
+          // trigger file picker
+          input.click();
+        } catch (e) {
+          console.error('Could not open file picker for spieler.csv', e);
+          resolve(null);
+        }
+      });
+    }
+
     // Simple localStorage cache for tournament dates
     const TOURNAMENT_CACHE_KEY = 'ch_tournament_dates_v2';
     // Tournament dates are fixed; do not expire in the cache.
@@ -861,7 +1007,7 @@
           // map sex to expected param values (male -> m, female -> w), omit for 'both'
           let sexParam = '';
           if (sexSel === 'male') sexParam = 'm';
-          else if (sexSel === 'female') sexParam = 'w';
+          else if (sexSel === 'female') sexParam = 'f';
 
           // build query params
           const params = [];
@@ -910,8 +1056,38 @@
             if (names.length === 0) {
               alert('Keine Spieler-Links gefunden.');
             } else {
-              const pkzInput = document.getElementById('pkz');
-              if (pkzInput) pkzInput.value = names.join(',');
+              // Try to convert fetched player NAMES to IDs using spieler.csv
+              try {
+                const map = await loadSpielerCsv();
+                const mapped = [];
+                const notFound = [];
+                for (const n of names) {
+                  const key = normalizeSpielerName(n);
+                  const id = map.get(key);
+                  if (id) mapped.push(id);
+                  else notFound.push(n);
+                }
+
+                const pkzInput = document.getElementById('pkz');
+                if (pkzInput) {
+                  if (mapped.length > 0 && notFound.length === 0) {
+                    // all mapped -> populate with IDs
+                    pkzInput.value = mapped.join(',');
+                  } else if (mapped.length > 0 && notFound.length > 0) {
+                    // mixed -> combine mapped IDs plus original names for those not found
+                    pkzInput.value = mapped.concat(notFound).join(',');
+                    console.warn('Some top-player names could not be resolved to IDs:', notFound);
+                  } else {
+                    // none mapped -> keep original behaviour
+                    pkzInput.value = names.join(',');
+                    console.warn('No top-player names could be resolved to IDs. See console for details.');
+                  }
+                }
+              } catch (err) {
+                console.error('Error converting top player names to IDs:', err);
+                const pkzInput = document.getElementById('pkz');
+                if (pkzInput) pkzInput.value = names.join(',');
+              }
             }
           } catch (err) {
             console.error('Fehler beim Laden der Topliste:', err);

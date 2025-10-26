@@ -1,0 +1,7 @@
+# Ignore local large CSV with player data (kept out of the repo)
+spieler.csv
+
+# Common ignores
+node_modules/
+.vscode/
+.DS_Store

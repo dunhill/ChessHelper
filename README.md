@@ -16,6 +16,8 @@ Written with ChatGPT.
 * Can adjust the timeline to the age of the players. Usefull to compare DWZ progres when players were at the same age
 * Shows the cache usage and the total number of tournaments in the cache
 
+The list of players needs to be fetched manually from https://www.schachbund.de/dwz-archiv-downloads-dsb.html, e.g. https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip
+
 ### Todo
 * Fetch top-X players per filter (age, sex, bundesland)
 * Fetch all players from the chess-results table
