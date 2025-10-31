@@ -1031,6 +1031,7 @@
           if (sexParam) params.push(`sex=${encodeURIComponent(sexParam)}`);
           if (minAge) params.push(`age_from=${encodeURIComponent(minAge)}`);
           if (maxAge) params.push(`age_to=${encodeURIComponent(maxAge)}`);
+          if (true) params.push(`german=1`);
 
           const base = `https://www.schachbund.de/verband/${encodeURIComponent(land)}.html`;
           const url = params.length ? `${base}?${params.join('&')}` : base;
