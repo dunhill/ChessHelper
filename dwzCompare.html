@@ -175,6 +175,7 @@
   <div style="display:flex; align-items:center; gap:8px;">
     <label for="pkz" style="margin-right:6px;">Spieler-IDs (kommagetrennt):</label>
     <a id="addTopPlayersLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
+    <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
   </div>
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
 
@@ -235,6 +236,21 @@
       <div class="modal-actions">
         <button id="topPlayersCancel" type="button">Abbrechen</button>
         <button id="topPlayersAdd" type="button">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chess-Results modal -->
+  <div id="crModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10001;">
+    <div id="crModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:480px; max-width:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 8px 0; font-size:1.05rem;">Add from chess-results</h3>
+      <label for="crUrl">URL zur chess-results Seite</label>
+      <input id="crUrl" type="url" placeholder="https://chess-results.com/tnrXXXXXX.aspx?lan=1&art=0" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box;">
+      <label for="crMaxCount" style="margin-top:8px; display:block;">Max. Anzahl Spieler (0 = alle)</label>
+      <input id="crMaxCount" type="number" min="0" value="0" style="width:120px; padding:6px; margin-top:4px; box-sizing:border-box;">
+      <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="crCancel" type="button">Abbrechen</button>
+        <button id="crAdd" type="button">Add</button>
       </div>
     </div>
   </div>
@@ -1098,6 +1114,122 @@
           }
         });
       }
+    })();
+
+    // === Add from chess-results modal handling ===
+    (function () {
+      const crLink = document.getElementById('addFromChessResultsLink');
+      const overlay = document.getElementById('crModalOverlay');
+      const cancelBtn = document.getElementById('crCancel');
+      const addBtn = document.getElementById('crAdd');
+      const urlInput = document.getElementById('crUrl');
+
+      if (!overlay || !crLink) return;
+
+      crLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        overlay.style.display = 'flex';
+        const first = overlay.querySelector('#crUrl');
+        if (first) first.focus();
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        if (crLink) crLink.focus();
+      });
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (crLink) crLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (crLink) crLink.focus();
+        }
+      });
+
+      addBtn.addEventListener('click', async () => {
+        const rawUrl = (urlInput.value || '').trim();
+        if (!rawUrl) { alert('Bitte eine URL angeben.'); return; }
+
+        try {
+          // fetch via cors proxy to avoid cross-origin issues
+          const resp = await fetch(`https://corsproxy.io/?${encodeURIComponent(rawUrl)}`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const html = await resp.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, 'text/html');
+
+          // find table with class CRs1
+          const table = doc.querySelector('table.CRs1');
+          if (!table) {
+            alert('Tabelle mit Klasse "CRs1" nicht gefunden. Bitte prüfen Sie die URL.');
+            return;
+          }
+
+          const rows = Array.from(table.querySelectorAll('tr'));
+          let names = [];
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            // skip header row(s) that contain th elements
+            if (row.querySelectorAll('th').length > 0) continue;
+            const cells = Array.from(row.querySelectorAll('td'));
+            if (cells.length < 2) continue;
+            const name = (cells[1].textContent || '').trim();
+            if (name) names.push(name);
+          }
+
+          // apply max count limit if provided (>0)
+          const maxCountEl = document.getElementById('crMaxCount');
+          const maxCount = maxCountEl ? (parseInt(maxCountEl.value, 10) || 0) : 0;
+          if (maxCount > 0 && names.length > maxCount) {
+            names = names.slice(0, maxCount);
+            console.log(`Truncated chess-results names to first ${maxCount} entries.`);
+          }
+
+          if (names.length === 0) {
+            alert('Keine Spielernamen in der zweiten Spalte der CRs1-Tabelle gefunden.');
+            return;
+          }
+
+          // Map names to IDs using the existing spieler.csv loader
+          const map = await loadSpielerCsv();
+          const mapped = [];
+          const notFound = [];
+          for (const n of names) {
+            const key = normalizeSpielerName(n);
+            const id = map.get(key);
+            if (id) mapped.push(id);
+            else notFound.push(n);
+          }
+
+          const pkzInput = document.getElementById('pkz');
+          if (pkzInput) {
+            if (mapped.length > 0 && notFound.length === 0) {
+              pkzInput.value = mapped.join(',');
+            } else if (mapped.length > 0 && notFound.length > 0) {
+              pkzInput.value = mapped.concat(notFound).join(',');
+              console.warn('Some chess-results names could not be resolved to IDs:', notFound);
+            } else {
+              pkzInput.value = names.join(',');
+              console.warn('No chess-results names could be resolved to IDs. See console for details.');
+            }
+          }
+
+        } catch (err) {
+          console.error('Fehler beim Laden der chess-results Seite:', err);
+          alert('Fehler beim Laden der Seite. Details in Konsole.');
+        } finally {
+          overlay.style.display = 'none';
+          if (crLink) crLink.focus();
+        }
+      });
     })();
   </script>
 </body>
