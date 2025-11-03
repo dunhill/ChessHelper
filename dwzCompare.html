@@ -421,6 +421,7 @@
     const AGE_ADJUST_KEY = 'ch_age_adjust_v1';
     const PKZ_YEAR_CACHE_KEY = 'ch_pkz_years_v1';
     const MONTHS_KEY = 'ch_months_v1';
+    const PLAYER_CACHE_KEY = 'ch_players_v1';
     // load/save helpers for pkz -> birth year cache
     function loadPkzYearCache() {
       try { return JSON.parse(localStorage.getItem(PKZ_YEAR_CACHE_KEY) || '{}'); }
@@ -467,6 +468,39 @@
     function saveTournamentCache(cache) {
       try { localStorage.setItem(TOURNAMENT_CACHE_KEY, JSON.stringify(cache)); }
       catch (e) { /* ignore storage errors */ }
+    }
+
+    // load/save helpers for player name -> DWZ ID cache
+    function loadPlayerCache() {
+      try { return JSON.parse(localStorage.getItem(PLAYER_CACHE_KEY) || '{}'); }
+      catch (e) { return {}; }
+    }
+    function savePlayerCache(cache) {
+      try { localStorage.setItem(PLAYER_CACHE_KEY, JSON.stringify(cache)); }
+      catch (e) { /* ignore storage errors */ }
+    }
+    // Helper function to add players to cache if not already present
+    // Can accept a single player (name, id) or an array of [name, id] pairs
+    function addPlayersToCache(players) {
+      if (!players || players.length === 0) return;
+      const cache = loadPlayerCache();
+      let updated = false;
+      
+      // Handle both single player and array of players
+      const playerArray = Array.isArray(players[0]) ? players : [players];
+      
+      for (const [normalizedName, dwzId] of playerArray) {
+        if (!normalizedName || !dwzId) continue;
+        // Only add if not already in cache
+        if (!Object.prototype.hasOwnProperty.call(cache, normalizedName)) {
+          cache[normalizedName] = dwzId;
+          updated = true;
+        }
+      }
+      
+      if (updated) {
+        savePlayerCache(cache);
+      }
     }
     // restore previous input on page load
     try {
@@ -1078,11 +1112,21 @@
                 const map = await loadSpielerCsv();
                 const mapped = [];
                 const notFound = [];
+                const playersToCache = [];
                 for (const n of names) {
                   const key = normalizeSpielerName(n);
                   const id = map.get(key);
-                  if (id) mapped.push(id);
-                  else notFound.push(n);
+                  if (id) {
+                    mapped.push(id);
+                    // Collect players to cache
+                    playersToCache.push([key, id]);
+                  } else {
+                    notFound.push(n);
+                  }
+                }
+                // Store all players in cache if not already present
+                if (playersToCache.length > 0) {
+                  addPlayersToCache(playersToCache);
                 }
 
                 const pkzInput = document.getElementById('pkz');
@@ -1227,11 +1271,21 @@
           const map = await loadSpielerCsv();
           const mapped = [];
           const notFound = [];
+          const playersToCache = [];
           for (const n of names) {
             const key = normalizeSpielerName(n);
             const id = map.get(key);
-            if (id) mapped.push(id);
-            else notFound.push(n);
+            if (id) {
+              mapped.push(id);
+              // Collect players to cache
+              playersToCache.push([key, id]);
+            } else {
+              notFound.push(n);
+            }
+          }
+          // Store all players in cache if not already present
+          if (playersToCache.length > 0) {
+            addPlayersToCache(playersToCache);
           }
 
           const pkzInput = document.getElementById('pkz');
