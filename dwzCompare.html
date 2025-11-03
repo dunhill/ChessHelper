@@ -1175,14 +1175,38 @@
           }
 
           const rows = Array.from(table.querySelectorAll('tr'));
+          
+          // Find the header row and determine the index of the "Name" column
+          let nameColumnIndex = -1;
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const headerCells = Array.from(row.querySelectorAll('th'));
+            if (headerCells.length > 0) {
+              // This is a header row, find the "Name" column
+              for (let j = 0; j < headerCells.length; j++) {
+                const headerText = (headerCells[j].textContent || '').trim();
+                if (headerText.toLowerCase() === 'name') {
+                  nameColumnIndex = j;
+                  break;
+                }
+              }
+              break; // Found the header row, no need to continue
+            }
+          }
+          
+          if (nameColumnIndex === -1) {
+            alert('Spalte "Name" in der Kopfzeile nicht gefunden.');
+            return;
+          }
+          
           let names = [];
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             // skip header row(s) that contain th elements
             if (row.querySelectorAll('th').length > 0) continue;
             const cells = Array.from(row.querySelectorAll('td'));
-            if (cells.length < 2) continue;
-            const name = (cells[1].textContent || '').trim();
+            if (cells.length <= nameColumnIndex) continue;
+            const name = (cells[nameColumnIndex].textContent || '').trim();
             if (name) names.push(name);
           }
 
