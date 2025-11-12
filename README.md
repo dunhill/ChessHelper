@@ -10,6 +10,7 @@ Written with ChatGPT.
 * Can import Player DWZ IDs from:
   * Top-N players per filter (age, sex, bundesland). See "Player Name-ID mapping"
   * chess-results table. See "Player Name-ID mapping"
+  * history of earlier lookups
 * Can load only last X months
 * Caches tournament dates in the browser local cache to minimize the calls to DWZ website
 
@@ -24,5 +25,4 @@ The mapping from Player Name to their DWZ ID needs to fetched manually from http
 * Shows the cache usage and the total number of tournaments in the cache
 
 ### Todo
-* Fetch players from the history window. Order by name, checkboxes for multiple select
 * Cache local location of the player-ID mapping file and automaticaly use it when needed
