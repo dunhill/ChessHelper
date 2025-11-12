@@ -176,6 +176,7 @@
     <label for="pkz" style="margin-right:6px;">Spieler-IDs (kommagetrennt):</label>
     <a id="addTopPlayersLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
     <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
+    <a id="addFromHistoryLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from history</a>
   </div>
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
 
@@ -251,6 +252,19 @@
       <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
         <button id="crCancel" type="button">Abbrechen</button>
         <button id="crAdd" type="button">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- History modal -->
+  <div id="historyModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10002;">
+    <div id="historyModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:600px; max-width:calc(100% - 32px); max-height:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2); display:flex; flex-direction:column;">
+      <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Add from history</h3>
+      <label for="historyPlayerList" style="margin-bottom:4px; font-size:13px;">Select players (hold Ctrl/Cmd to select multiple):</label>
+      <select id="historyPlayerList" multiple size="15" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box; border:1px solid #ddd; font-size:13px; overflow-y:auto;"></select>
+      <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="historyCancel" type="button">Abbrechen</button>
+        <button id="historyAdd" type="button">Add</button>
       </div>
     </div>
   </div>
@@ -1305,6 +1319,106 @@
           overlay.style.display = 'none';
           if (crLink) crLink.focus();
         }
+      });
+    })();
+
+    // === Add from history modal handling ===
+    (function () {
+      const historyLink = document.getElementById('addFromHistoryLink');
+      const overlay = document.getElementById('historyModalOverlay');
+      const cancelBtn = document.getElementById('historyCancel');
+      const addBtn = document.getElementById('historyAdd');
+      const playerList = document.getElementById('historyPlayerList');
+
+      if (!overlay || !historyLink || !playerList) return;
+
+      // Function to populate the player list from cache
+      function populatePlayerList() {
+        const cache = loadPlayerCache();
+        const players = [];
+        
+        // Convert cache object to array of {name, id} objects
+        for (const [normalizedName, id] of Object.entries(cache)) {
+          if (normalizedName && id) {
+            players.push({ name: normalizedName, id: id });
+          }
+        }
+        
+        // Sort by name (case-insensitive)
+        players.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        
+        // Clear existing options
+        playerList.innerHTML = '';
+        
+        // Populate select element
+        if (players.length === 0) {
+          const option = document.createElement('option');
+          option.textContent = '(No players in history)';
+          option.disabled = true;
+          playerList.appendChild(option);
+        } else {
+          players.forEach(player => {
+            const option = document.createElement('option');
+            option.value = player.id;
+            option.textContent = `${player.name} (ID: ${player.id})`;
+            playerList.appendChild(option);
+          });
+        }
+      }
+
+      historyLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        populatePlayerList();
+        overlay.style.display = 'flex';
+        if (playerList) playerList.focus();
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        if (historyLink) historyLink.focus();
+      });
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (historyLink) historyLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (historyLink) historyLink.focus();
+        }
+      });
+
+      addBtn.addEventListener('click', () => {
+        const selectedOptions = Array.from(playerList.selectedOptions);
+        
+        if (selectedOptions.length === 0) {
+          alert('Bitte mindestens einen Spieler auswählen.');
+          return;
+        }
+        
+        // Get IDs from selected options
+        const selectedIds = selectedOptions.map(option => option.value);
+        
+        // Add IDs to the pkz input field
+        const pkzInput = document.getElementById('pkz');
+        if (pkzInput) {
+          const currentValue = (pkzInput.value || '').trim();
+          const currentIds = currentValue ? currentValue.split(',').map(id => id.trim()).filter(Boolean) : [];
+          
+          // Combine current IDs with new IDs, avoiding duplicates
+          const allIds = [...new Set([...currentIds, ...selectedIds])];
+          pkzInput.value = allIds.join(',');
+        }
+        
+        // Close modal
+        overlay.style.display = 'none';
+        if (historyLink) historyLink.focus();
       });
     })();
   </script>
