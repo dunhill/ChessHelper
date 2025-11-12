@@ -866,26 +866,51 @@
       } = options;
       
       try {
-        const map = await loadSpielerCsv();
+        // First, try to resolve names from browser cache
+        const cache = loadPlayerCache();
         const mapped = [];
         const notFound = [];
-        const playersToCache = [];
+        const missingFromCache = []; // Names not found in cache
         
+        // Check cache first
         for (const n of names) {
           const key = normalizeSpielerName(n);
-          const id = map.get(key);
-          if (id) {
-            mapped.push(id);
-            // Collect players to cache
-            playersToCache.push([key, id]);
+          const cachedId = cache[key];
+          if (cachedId) {
+            mapped.push(cachedId);
           } else {
-            notFound.push(n);
+            missingFromCache.push(n);
           }
         }
         
-        // Store all players in cache if not already present
-        if (playersToCache.length > 0) {
-          addPlayersToCache(playersToCache);
+        // Only load CSV if there are names missing from cache
+        if (missingFromCache.length > 0) {
+          try {
+            const csvMap = await loadSpielerCsv();
+            const playersToCache = [];
+            
+            // Look up missing names in CSV
+            for (const n of missingFromCache) {
+              const key = normalizeSpielerName(n);
+              const id = csvMap.get(key);
+              if (id) {
+                mapped.push(id);
+                // Collect players to cache
+                playersToCache.push([key, id]);
+              } else {
+                notFound.push(n);
+              }
+            }
+            
+            // Store newly found players in cache
+            if (playersToCache.length > 0) {
+              addPlayersToCache(playersToCache);
+            }
+          } catch (csvErr) {
+            // If CSV loading fails, mark all missing names as not found
+            console.error('Error loading CSV file:', csvErr);
+            notFound.push(...missingFromCache);
+          }
         }
         
         // Optionally update the pkzInput field
