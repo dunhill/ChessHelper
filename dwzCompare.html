@@ -842,6 +842,68 @@
       }
     }
 
+    // Helper function to convert player names to player IDs
+    // Returns { mapped: string[], notFound: string[] }
+    // Optionally updates the pkzInput field and logs warnings
+    async function convertPlayerNamesToIds(names, options = {}) {
+      const { 
+        updateInput = false, 
+        contextName = 'player' // for warning messages
+      } = options;
+      
+      try {
+        const map = await loadSpielerCsv();
+        const mapped = [];
+        const notFound = [];
+        const playersToCache = [];
+        
+        for (const n of names) {
+          const key = normalizeSpielerName(n);
+          const id = map.get(key);
+          if (id) {
+            mapped.push(id);
+            // Collect players to cache
+            playersToCache.push([key, id]);
+          } else {
+            notFound.push(n);
+          }
+        }
+        
+        // Store all players in cache if not already present
+        if (playersToCache.length > 0) {
+          addPlayersToCache(playersToCache);
+        }
+        
+        // Optionally update the pkzInput field
+        if (updateInput) {
+          const pkzInput = document.getElementById('pkz');
+          if (pkzInput) {
+            if (mapped.length > 0 && notFound.length === 0) {
+              // all mapped -> populate with IDs
+              pkzInput.value = mapped.join(',');
+            } else if (mapped.length > 0 && notFound.length > 0) {
+              // mixed -> combine mapped IDs plus original names for those not found
+              pkzInput.value = mapped.concat(notFound).join(',');
+              console.warn(`Some ${contextName} names could not be resolved to IDs:`, notFound);
+            } else {
+              // none mapped -> keep original behaviour
+              pkzInput.value = names.join(',');
+              console.warn(`No ${contextName} names could be resolved to IDs. See console for details.`);
+            }
+          }
+        }
+        
+        return { mapped, notFound };
+      } catch (err) {
+        console.error(`Error converting ${contextName} names to IDs:`, err);
+        if (updateInput) {
+          const pkzInput = document.getElementById('pkz');
+          if (pkzInput) pkzInput.value = names.join(',');
+        }
+        return { mapped: [], notFound: names };
+      }
+    }
+
     // Build per-player visibility checkboxes under the chart.
     function buildPlayerToggles(players) {
       const container = document.getElementById('playerToggles');
@@ -1108,47 +1170,10 @@
               alert('Keine Spieler-Links gefunden.');
             } else {
               // Try to convert fetched player NAMES to IDs using spieler.csv
-              try {
-                const map = await loadSpielerCsv();
-                const mapped = [];
-                const notFound = [];
-                const playersToCache = [];
-                for (const n of names) {
-                  const key = normalizeSpielerName(n);
-                  const id = map.get(key);
-                  if (id) {
-                    mapped.push(id);
-                    // Collect players to cache
-                    playersToCache.push([key, id]);
-                  } else {
-                    notFound.push(n);
-                  }
-                }
-                // Store all players in cache if not already present
-                if (playersToCache.length > 0) {
-                  addPlayersToCache(playersToCache);
-                }
-
-                const pkzInput = document.getElementById('pkz');
-                if (pkzInput) {
-                  if (mapped.length > 0 && notFound.length === 0) {
-                    // all mapped -> populate with IDs
-                    pkzInput.value = mapped.join(',');
-                  } else if (mapped.length > 0 && notFound.length > 0) {
-                    // mixed -> combine mapped IDs plus original names for those not found
-                    pkzInput.value = mapped.concat(notFound).join(',');
-                    console.warn('Some top-player names could not be resolved to IDs:', notFound);
-                  } else {
-                    // none mapped -> keep original behaviour
-                    pkzInput.value = names.join(',');
-                    console.warn('No top-player names could be resolved to IDs. See console for details.');
-                  }
-                }
-              } catch (err) {
-                console.error('Error converting top player names to IDs:', err);
-                const pkzInput = document.getElementById('pkz');
-                if (pkzInput) pkzInput.value = names.join(',');
-              }
+              await convertPlayerNamesToIds(names, { 
+                updateInput: true, 
+                contextName: 'top-player' 
+              });
             }
           } catch (err) {
             console.error('Fehler beim Laden der Topliste:', err);
@@ -1268,38 +1293,10 @@
           }
 
           // Map names to IDs using the existing spieler.csv loader
-          const map = await loadSpielerCsv();
-          const mapped = [];
-          const notFound = [];
-          const playersToCache = [];
-          for (const n of names) {
-            const key = normalizeSpielerName(n);
-            const id = map.get(key);
-            if (id) {
-              mapped.push(id);
-              // Collect players to cache
-              playersToCache.push([key, id]);
-            } else {
-              notFound.push(n);
-            }
-          }
-          // Store all players in cache if not already present
-          if (playersToCache.length > 0) {
-            addPlayersToCache(playersToCache);
-          }
-
-          const pkzInput = document.getElementById('pkz');
-          if (pkzInput) {
-            if (mapped.length > 0 && notFound.length === 0) {
-              pkzInput.value = mapped.join(',');
-            } else if (mapped.length > 0 && notFound.length > 0) {
-              pkzInput.value = mapped.concat(notFound).join(',');
-              console.warn('Some chess-results names could not be resolved to IDs:', notFound);
-            } else {
-              pkzInput.value = names.join(',');
-              console.warn('No chess-results names could be resolved to IDs. See console for details.');
-            }
-          }
+          await convertPlayerNamesToIds(names, { 
+            updateInput: true, 
+            contextName: 'chess-results' 
+          });
 
         } catch (err) {
           console.error('Fehler beim Laden der chess-results Seite:', err);
