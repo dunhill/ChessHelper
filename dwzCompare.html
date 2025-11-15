@@ -234,6 +234,11 @@
       <label for="topMaxCount">Max. Anzahl Spieler</label>
       <input id="topMaxCount" type="number" min="1" value="10">
 
+      <label style="display:flex; align-items:center; gap:6px; margin-top:8px; cursor:pointer;">
+        <input id="topGermanOnly" type="checkbox" style="width:auto; margin:0;">
+        <span>Nur deutsche Spieler</span>
+      </label>
+
       <div class="modal-actions">
         <button id="topPlayersCancel" type="button">Abbrechen</button>
         <button id="topPlayersAdd" type="button">Add</button>
@@ -1137,12 +1142,14 @@
             const maxAgeEl = document.getElementById('topMaxAge');
             const sexEl = document.getElementById('topSex');
             const maxCountEl = document.getElementById('topMaxCount');
+            const germanOnlyEl = document.getElementById('topGermanOnly');
             
             if (landEl && savedSettings.land !== undefined) landEl.value = savedSettings.land;
             if (minAgeEl && savedSettings.minAge !== undefined) minAgeEl.value = savedSettings.minAge;
             if (maxAgeEl && savedSettings.maxAge !== undefined) maxAgeEl.value = savedSettings.maxAge;
             if (sexEl && savedSettings.sex !== undefined) sexEl.value = savedSettings.sex;
             if (maxCountEl && savedSettings.maxCount !== undefined) maxCountEl.value = savedSettings.maxCount;
+            if (germanOnlyEl && savedSettings.germanOnly !== undefined) germanOnlyEl.checked = savedSettings.germanOnly;
           }
           overlay.style.display = 'flex';
           // focus first focusable element inside modal for accessibility
@@ -1184,6 +1191,7 @@
           const minAge = (document.getElementById('topMinAge')?.value || '').trim();
           const maxAge = (document.getElementById('topMaxAge')?.value || '').trim();
           const land = (document.getElementById('topLand')?.value || '000').trim(); // '000' or '300'
+          const germanOnly = document.getElementById('topGermanOnly')?.checked || false;
 
           // Save settings to localStorage
           saveTopPlayersSettings({
@@ -1191,7 +1199,8 @@
             minAge: minAge,
             maxAge: maxAge,
             sex: sexSel,
-            maxCount: count
+            maxCount: count,
+            germanOnly: germanOnly
           });
 
           // map sex to expected param values (male -> m, female -> w), omit for 'both'
@@ -1205,7 +1214,7 @@
           if (sexParam) params.push(`sex=${encodeURIComponent(sexParam)}`);
           if (minAge) params.push(`age_from=${encodeURIComponent(minAge)}`);
           if (maxAge) params.push(`age_to=${encodeURIComponent(maxAge)}`);
-          if (true) params.push(`german=1`);
+          if (germanOnly) params.push(`german=1`);
 
           const base = `https://www.schachbund.de/verband/${encodeURIComponent(land)}.html`;
           const url = params.length ? `${base}?${params.join('&')}` : base;
