@@ -436,6 +436,7 @@
     const PKZ_YEAR_CACHE_KEY = 'ch_pkz_years_v1';
     const MONTHS_KEY = 'ch_months_v1';
     const PLAYER_CACHE_KEY = 'ch_players_v1';
+    const TOP_PLAYERS_SETTINGS_KEY = 'ch_top_players_settings_v1';
     // load/save helpers for pkz -> birth year cache
     function loadPkzYearCache() {
       try { return JSON.parse(localStorage.getItem(PKZ_YEAR_CACHE_KEY) || '{}'); }
@@ -473,6 +474,20 @@
     function saveMonths(v) {
       try { localStorage.setItem(MONTHS_KEY, (Number.isFinite(v) ? String(v) : '12')); }
       catch (e) { /* ignore */ }
+    }
+
+    // load/save helpers for top players modal settings
+    function loadTopPlayersSettings() {
+      try {
+        const stored = localStorage.getItem(TOP_PLAYERS_SETTINGS_KEY);
+        if (!stored) return null;
+        return JSON.parse(stored);
+      } catch (e) { return null; }
+    }
+    function saveTopPlayersSettings(settings) {
+      try {
+        localStorage.setItem(TOP_PLAYERS_SETTINGS_KEY, JSON.stringify(settings));
+      } catch (e) { /* ignore */ }
     }
 
     function loadTournamentCache() {
@@ -1114,6 +1129,21 @@
       if (addTopPlayersLink) {
         addTopPlayersLink.addEventListener('click', (e) => {
           e.preventDefault();
+          // Load saved settings and populate form fields
+          const savedSettings = loadTopPlayersSettings();
+          if (savedSettings) {
+            const landEl = document.getElementById('topLand');
+            const minAgeEl = document.getElementById('topMinAge');
+            const maxAgeEl = document.getElementById('topMaxAge');
+            const sexEl = document.getElementById('topSex');
+            const maxCountEl = document.getElementById('topMaxCount');
+            
+            if (landEl && savedSettings.land !== undefined) landEl.value = savedSettings.land;
+            if (minAgeEl && savedSettings.minAge !== undefined) minAgeEl.value = savedSettings.minAge;
+            if (maxAgeEl && savedSettings.maxAge !== undefined) maxAgeEl.value = savedSettings.maxAge;
+            if (sexEl && savedSettings.sex !== undefined) sexEl.value = savedSettings.sex;
+            if (maxCountEl && savedSettings.maxCount !== undefined) maxCountEl.value = savedSettings.maxCount;
+          }
           overlay.style.display = 'flex';
           // focus first focusable element inside modal for accessibility
           const first = overlay.querySelector('select, input, button');
@@ -1154,6 +1184,15 @@
           const minAge = (document.getElementById('topMinAge')?.value || '').trim();
           const maxAge = (document.getElementById('topMaxAge')?.value || '').trim();
           const land = (document.getElementById('topLand')?.value || '000').trim(); // '000' or '300'
+
+          // Save settings to localStorage
+          saveTopPlayersSettings({
+            land: land,
+            minAge: minAge,
+            maxAge: maxAge,
+            sex: sexSel,
+            maxCount: count
+          });
 
           // map sex to expected param values (male -> m, female -> w), omit for 'both'
           let sexParam = '';
