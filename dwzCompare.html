@@ -295,8 +295,49 @@
 
     function normalizeSpielerName(s) {
       if (!s) return '';
+      // Normalize German umlauts to base characters to handle encoding issues
+      // This allows matching even if CSV has corrupted umlauts
+      let normalized = s
+        .replace(/[äÄ]/g, 'a')
+        .replace(/[öÖ]/g, 'o')
+        .replace(/[üÜ]/g, 'u')
+        .replace(/[ß]/g, 'ss');
       // collapse whitespace, remove spaces after commas, trim and lowercase
-      return s.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+      return normalized.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+    }
+
+    // Create a regex pattern from a search string that matches umlauts as wildcards
+    // This helps when CSV has encoding issues where umlauts are replaced by a single symbol
+    function createUmlautFuzzyPattern(searchName) {
+      if (!searchName) return null;
+      
+      // Only create fuzzy pattern if the original string contains umlauts
+      // This avoids false positives when searching for names without umlauts
+      const hasUmlaut = /[äöüÄÖÜ]/.test(searchName);
+      if (!hasUmlaut) return null;
+      
+      // Use a placeholder that won't appear in names to mark umlaut positions
+      const placeholder = '\u0001'; // Use a control character as placeholder
+      let pattern = searchName
+        .replace(/[äÄ]/g, placeholder)  // Mark ä positions
+        .replace(/[öÖ]/g, placeholder)   // Mark ö positions
+        .replace(/[üÜ]/g, placeholder)   // Mark ü positions
+        .replace(/[ß]/g, 'ss');           // ß -> ss
+      
+      // Normalize: collapse whitespace, remove spaces after commas, trim and lowercase
+      pattern = pattern.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+      
+      // Escape special regex characters first
+      pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Then replace placeholder with . (wildcard) - this won't be escaped since placeholder is not a regex special char
+      pattern = pattern.replace(new RegExp(placeholder, 'g'), '.');
+      
+      try {
+        return new RegExp('^' + pattern + '$', 'i');
+      } catch (e) {
+        console.warn('Failed to create fuzzy pattern for:', searchName, e);
+        return null;
+      }
     }
 
     async function loadSpielerCsv() {
@@ -912,7 +953,22 @@
             // Look up missing names in CSV
             for (const n of missingFromCache) {
               const key = normalizeSpielerName(n);
-              const id = csvMap.get(key);
+              let id = csvMap.get(key);
+              
+              // If exact match failed, try fuzzy matching with regex (handles corrupted umlauts)
+              if (!id) {
+                const fuzzyPattern = createUmlautFuzzyPattern(n);
+                if (fuzzyPattern) {
+                  // Search through all map keys for a match
+                  for (const [mapKey, mapId] of csvMap.entries()) {
+                    if (fuzzyPattern.test(mapKey)) {
+                      id = mapId;
+                      break;
+                    }
+                  }
+                }
+              }
+              
               if (id) {
                 mapped.push(id);
                 // Collect players to cache
