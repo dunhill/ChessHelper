@@ -269,6 +269,13 @@
             // Step 4: Normalize whitespace but preserve structure
             cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
+            // Step 5: Remove game outcome from the end of the moves text to prevent it from being parsed as a move
+            if (gameOutcome) {
+                // Remove the outcome pattern from the end of the cleaned text
+                const outcomeAtEnd = new RegExp('\\s*\\b' + gameOutcome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$');
+                cleaned = cleaned.replace(outcomeAtEnd, '').trim();
+            }
+
             if (!cleaned || cleaned.length === 0) {
                 throw new Error('Parsing failed: No moves found in the PGN notation.');
             }
@@ -282,6 +289,12 @@
 
             while (i < tokens.length) {
                 const token = tokens[i];
+
+                // Skip game outcome tokens (0-1, 1-0, 1/2-1/2)
+                if (token.match(/^(0-1|1-0|1\/2-1\/2)$/)) {
+                    i++;
+                    continue;
+                }
 
                 // Check for black move with three dots first: "1..." followed by a move
                 const blackMoveMatch = token.match(/^(\d+)\.\.\.$/);
