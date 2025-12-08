@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Time Entry - PGN Notation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 2em;
+        }
+
+        .input-section {
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            color: #555;
+            font-weight: 600;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 15px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .moves-container {
+            margin-top: 30px;
+        }
+
+        .move-row {
+            display: grid;
+            grid-template-columns: 120px 150px 120px 150px;
+            gap: 15px;
+            align-items: center;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            transition: background 0.2s;
+        }
+
+        .move-row:hover {
+            background: #e9ecef;
+        }
+
+        .move-row:nth-child(even) {
+            background: #f1f3f5;
+        }
+
+        .move-row:nth-child(even):hover {
+            background: #dee2e6;
+        }
+
+        .move-number {
+            font-weight: 600;
+            color: #666;
+            text-align: right;
+            padding-right: 10px;
+        }
+
+        .move-label {
+            font-weight: 600;
+            color: #333;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #ddd;
+            font-family: 'Courier New', monospace;
+        }
+
+        .time-input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            font-family: 'Courier New', monospace;
+        }
+
+        .time-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .error-message {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+            border-left: 4px solid #dc3545;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .no-moves {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>♟️ Chess Time Entry</h1>
+        
+        <div class="input-section">
+            <label for="pgn-input">Enter PGN Notation:</label>
+            <textarea id="pgn-input" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7..."></textarea>
+            <button onclick="generateMoveRows()">Generate Move Rows</button>
+            <div id="error-message" class="error-message"></div>
+        </div>
+
+        <div class="moves-container" id="moves-container">
+            <div class="no-moves">Enter PGN notation above and click "Generate Move Rows" to get started.</div>
+        </div>
+
+        <div class="output-section" id="output-section" style="display: none;">
+            <button onclick="generateNewPGN()" style="margin-top: 30px;">Generate New PGN</button>
+            
+            <div style="margin-top: 6px;"></div>
+            <div style="margin-top: 6px;"></div>
+            <div style="margin-top: 6px;"></div>
+            <div style="margin-top: 6px;"></div>
+            <div style="margin-top: 6px;"></div>
+            <div style="margin-top: 6px;"></div>
+            
+            <label for="pgn-output" style="margin-top: 20px; display: block;">Generated PGN:</label>
+            <textarea id="pgn-output" style="width: 100%; min-height: 200px; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 14px; resize: vertical; margin-top: 10px;"></textarea>
+        </div>
+    </div>
+
+    <script>
+        // Global variables to store metadata and game outcome
+        let originalMetadata = [];
+        let gameOutcome = '';
+
+        function parsePGN(pgnText) {
+            // Step 1: Extract metadata (lines that start with [ and end with ])
+            const lines = pgnText.split('\n');
+            originalMetadata = [];
+            let movesStartIndex = 0;
+            
+            for (let i = 0; i < lines.length; i++) {
+                const trimmed = lines[i].trim();
+                if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                    originalMetadata.push(trimmed);
+                } else if (trimmed.length > 0 && !trimmed.match(/^\s*$/)) {
+                    // First non-empty, non-metadata line marks the start of moves
+                    movesStartIndex = i;
+                    break;
+                }
+            }
+            
+            // Extract game outcome from the end (0-1, 1-0, or 1/2-1/2)
+            gameOutcome = '';
+            const outcomePattern = /\b(0-1|1-0|1\/2-1\/2)\b/;
+            const outcomeMatch = pgnText.match(outcomePattern);
+            if (outcomeMatch) {
+                gameOutcome = outcomeMatch[1];
+            }
+            
+            // Get the moves block (everything after metadata)
+            let cleaned = lines.slice(movesStartIndex).join('\n');
+
+            // Step 2: Remove everything within curly brackets { } (comments)
+            cleaned = cleaned.replace(/\{[^}]*\}/g, '');
+
+            // Step 3: Remove everything within parentheses ( ) (side lines/variations)
+            // Handle nested parentheses by tracking depth
+            let result = '';
+            let depth = 0;
+            for (let i = 0; i < cleaned.length; i++) {
+                if (cleaned[i] === '(') {
+                    depth++;
+                } else if (cleaned[i] === ')') {
+                    depth--;
+                } else if (depth === 0) {
+                    result += cleaned[i];
+                }
+            }
+            cleaned = result;
+
+            // Step 4: Normalize whitespace but preserve structure
+            cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+            const moves = [];
+            const moveMap = new Map();
+
+            // Tokenize the cleaned text
+            const tokens = cleaned.split(/\s+/);
+            let i = 0;
+
+            while (i < tokens.length) {
+                const token = tokens[i];
+
+                // Check for black move with three dots first: "1..." followed by a move
+                // (Check this before white moves to avoid confusion)
+                const blackMoveMatch = token.match(/^(\d+)\.\.\.$/);
+                if (blackMoveMatch) {
+                    const moveNumber = parseInt(blackMoveMatch[1]);
+                    
+                    if (i + 1 < tokens.length) {
+                        const blackMove = tokens[i + 1];
+                        
+                        // Check if blackMove is not itself a move number pattern
+                        if (!blackMove.match(/^\d+\.\.?\.?$/)) {
+                            if (!moveMap.has(moveNumber)) {
+                                moveMap.set(moveNumber, { moveNumber, whiteMove: null, blackMove });
+                            } else {
+                                moveMap.get(moveNumber).blackMove = blackMove;
+                            }
+                            
+                            i += 2; // Skip move number with dots and black move
+                            continue;
+                        }
+                    }
+                }
+
+                // Check for white move: "1." followed by a move (single dot only)
+                const whiteMoveMatch = token.match(/^(\d+)\.$/);
+                if (whiteMoveMatch) {
+                    const moveNumber = parseInt(whiteMoveMatch[1]);
+                    
+                    // Check if next token exists and is not a move number
+                    if (i + 1 < tokens.length) {
+                        const nextToken = tokens[i + 1];
+                        
+                        // Check if next token is a move number pattern (like "2." or "1..." or "2...")
+                        // But NOT if it's the same number with three dots (that's handled above)
+                        if (!nextToken.match(/^\d+\.\.?\.?$/)) {
+                            // It's a white move
+                            const whiteMove = nextToken;
+                            
+                            if (!moveMap.has(moveNumber)) {
+                                moveMap.set(moveNumber, { moveNumber, whiteMove, blackMove: null });
+                            } else {
+                                moveMap.get(moveNumber).whiteMove = whiteMove;
+                            }
+                            
+                            i += 2; // Skip move number and white move
+                            
+                            // Check if there's a black move immediately after
+                            if (i < tokens.length) {
+                                const potentialBlackMove = tokens[i];
+                                
+                                // If it's not a move number pattern, it might be a black move
+                                if (!potentialBlackMove.match(/^\d+\.\.?\.?$/)) {
+                                    moveMap.get(moveNumber).blackMove = potentialBlackMove;
+                                    i++;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                i++;
+            }
+
+            // Convert map to array and sort by move number (ascending order)
+            const sortedMoves = Array.from(moveMap.values())
+                .sort((a, b) => a.moveNumber - b.moveNumber);
+
+            // Filter out moves that don't have at least a white move
+            return sortedMoves.filter(move => move.whiteMove !== null);
+        }
+
+        function generateMoveRows() {
+            const pgnInput = document.getElementById('pgn-input').value.trim();
+            const movesContainer = document.getElementById('moves-container');
+            const errorMessage = document.getElementById('error-message');
+
+            // Clear previous content
+            movesContainer.innerHTML = '';
+            errorMessage.classList.remove('show');
+            errorMessage.textContent = '';
+            document.getElementById('output-section').style.display = 'none';
+
+            if (!pgnInput) {
+                errorMessage.textContent = 'Please enter PGN notation.';
+                errorMessage.classList.add('show');
+                movesContainer.innerHTML = '<div class="no-moves">Enter PGN notation above and click "Generate Move Rows" to get started.</div>';
+                return;
+            }
+
+            const moves = parsePGN(pgnInput);
+
+            if (moves.length === 0) {
+                errorMessage.textContent = 'Could not parse any moves from the PGN notation. Please check the format.';
+                errorMessage.classList.add('show');
+                movesContainer.innerHTML = '<div class="no-moves">No moves found. Please check your PGN notation format.</div>';
+                return;
+            }
+
+            // Generate rows for each move pair
+            moves.forEach(move => {
+                const row = document.createElement('div');
+                row.className = 'move-row';
+                
+                const moveNumber = document.createElement('div');
+                moveNumber.className = 'move-number';
+                moveNumber.textContent = move.moveNumber + '.';
+                
+                const whiteMoveLabel = document.createElement('div');
+                whiteMoveLabel.className = 'move-label';
+                whiteMoveLabel.textContent = move.whiteMove;
+                
+                const whiteTimeInput = document.createElement('input');
+                whiteTimeInput.type = 'text';
+                whiteTimeInput.className = 'time-input';
+                whiteTimeInput.placeholder = 'Time (e.g., 5:30)';
+                whiteTimeInput.id = `time-white-${move.moveNumber}`;
+                
+                const blackMoveLabel = document.createElement('div');
+                blackMoveLabel.className = 'move-label';
+                blackMoveLabel.textContent = move.blackMove || '-';
+                
+                const blackTimeInput = document.createElement('input');
+                blackTimeInput.type = 'text';
+                blackTimeInput.className = 'time-input';
+                blackTimeInput.placeholder = 'Time (e.g., 5:25)';
+                blackTimeInput.id = `time-black-${move.moveNumber}`;
+                
+                if (!move.blackMove) {
+                    blackMoveLabel.style.opacity = '0.5';
+                    blackTimeInput.disabled = true;
+                    blackTimeInput.style.opacity = '0.5';
+                }
+                
+                row.appendChild(moveNumber);
+                row.appendChild(whiteMoveLabel);
+                row.appendChild(whiteTimeInput);
+                row.appendChild(blackMoveLabel);
+                row.appendChild(blackTimeInput);
+                
+                movesContainer.appendChild(row);
+            });
+
+            // Show the output section
+            document.getElementById('output-section').style.display = 'block';
+        }
+
+        function generateNewPGN() {
+            const movesContainer = document.getElementById('moves-container');
+            const moveRows = movesContainer.querySelectorAll('.move-row');
+            const outputTextarea = document.getElementById('pgn-output');
+
+            if (moveRows.length === 0) {
+                outputTextarea.value = 'No moves to generate PGN from.';
+                return;
+            }
+
+            let newPGN = '';
+
+            // Add metadata
+            if (originalMetadata.length > 0) {
+                newPGN = originalMetadata.join('\n') + '\n\n';
+            }
+
+            // Add moves
+            const movesText = [];
+            moveRows.forEach(row => {
+                const moveNumber = row.querySelector('.move-number').textContent.replace('.', '');
+                const whiteMove = row.querySelector('.move-label').textContent;
+                const blackMoveLabels = row.querySelectorAll('.move-label');
+                const blackMove = blackMoveLabels.length > 1 ? blackMoveLabels[1].textContent : null;
+
+                if (blackMove && blackMove !== '-') {
+                    movesText.push(`${moveNumber}. ${whiteMove} ${blackMove}`);
+                } else {
+                    movesText.push(`${moveNumber}. ${whiteMove}`);
+                }
+            });
+
+            newPGN += movesText.join(' ');
+
+            // Add game outcome
+            if (gameOutcome) {
+                newPGN += ' ' + gameOutcome;
+            }
+
+            outputTextarea.value = newPGN;
+        }
+
+        // Allow Enter key to trigger generation (Ctrl+Enter)
+        document.getElementById('pgn-input').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                generateMoveRows();
+            }
+        });
+    </script>
+</body>
+</html>
+
+
