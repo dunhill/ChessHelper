@@ -230,10 +230,22 @@
             // Get the moves block (everything after metadata)
             let cleaned = lines.slice(movesStartIndex).join('\n');
 
-            // Step 2: Remove everything within curly brackets { } (comments)
+            // Step 2: Validate and remove everything within curly brackets { } (comments)
+            // Check for unmatched curly brackets
+            let curlyDepth = 0;
+            for (let i = 0; i < cleaned.length; i++) {
+                if (cleaned[i] === '{') curlyDepth++;
+                else if (cleaned[i] === '}') curlyDepth--;
+                if (curlyDepth < 0) {
+                    throw new Error('Parsing failed: Unmatched closing curly bracket "}" found.');
+                }
+            }
+            if (curlyDepth > 0) {
+                throw new Error('Parsing failed: Unmatched opening curly bracket "{" found.');
+            }
             cleaned = cleaned.replace(/\{[^}]*\}/g, '');
 
-            // Step 3: Remove everything within parentheses ( ) (side lines/variations)
+            // Step 3: Validate and remove everything within parentheses ( ) (side lines/variations)
             // Handle nested parentheses by tracking depth
             let result = '';
             let depth = 0;
@@ -242,17 +254,27 @@
                     depth++;
                 } else if (cleaned[i] === ')') {
                     depth--;
+                    if (depth < 0) {
+                        throw new Error('Parsing failed: Unmatched closing parenthesis ")" found.');
+                    }
                 } else if (depth === 0) {
                     result += cleaned[i];
                 }
+            }
+            if (depth > 0) {
+                throw new Error('Parsing failed: Unmatched opening parenthesis "(" found.');
             }
             cleaned = result;
 
             // Step 4: Normalize whitespace but preserve structure
             cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
-            const moves = [];
+            if (!cleaned || cleaned.length === 0) {
+                throw new Error('Parsing failed: No moves found in the PGN notation.');
+            }
+
             const moveMap = new Map();
+            let lastProcessedMoveNumber = 0;
 
             // Tokenize the cleaned text
             const tokens = cleaned.split(/\s+/);
@@ -262,26 +284,29 @@
                 const token = tokens[i];
 
                 // Check for black move with three dots first: "1..." followed by a move
-                // (Check this before white moves to avoid confusion)
                 const blackMoveMatch = token.match(/^(\d+)\.\.\.$/);
                 if (blackMoveMatch) {
                     const moveNumber = parseInt(blackMoveMatch[1]);
                     
-                    if (i + 1 < tokens.length) {
-                        const blackMove = tokens[i + 1];
-                        
-                        // Check if blackMove is not itself a move number pattern
-                        if (!blackMove.match(/^\d+\.\.?\.?$/)) {
-                            if (!moveMap.has(moveNumber)) {
-                                moveMap.set(moveNumber, { moveNumber, whiteMove: null, blackMove });
-                            } else {
-                                moveMap.get(moveNumber).blackMove = blackMove;
-                            }
-                            
-                            i += 2; // Skip move number with dots and black move
-                            continue;
-                        }
+                    // Validate: black move with three dots must have a corresponding white move
+                    if (!moveMap.has(moveNumber) || !moveMap.get(moveNumber).whiteMove) {
+                        throw new Error(`Parsing failed: Black move "${token}" found without a corresponding white move for move ${moveNumber}.`);
                     }
+                    
+                    if (i + 1 >= tokens.length) {
+                        throw new Error(`Parsing failed: Black move number "${token}" is not followed by a move.`);
+                    }
+                    
+                    const blackMove = tokens[i + 1];
+                    
+                    // Check if blackMove is not itself a move number pattern
+                    if (blackMove.match(/^\d+\.\.?\.?$/)) {
+                        throw new Error(`Parsing failed: Black move number "${token}" is followed by another move number "${blackMove}" instead of a move.`);
+                    }
+                    
+                    moveMap.get(moveNumber).blackMove = blackMove;
+                    i += 2; // Skip move number with dots and black move
+                    continue;
                 }
 
                 // Check for white move: "1." followed by a move (single dot only)
@@ -289,37 +314,61 @@
                 if (whiteMoveMatch) {
                     const moveNumber = parseInt(whiteMoveMatch[1]);
                     
-                    // Check if next token exists and is not a move number
-                    if (i + 1 < tokens.length) {
-                        const nextToken = tokens[i + 1];
+                    // Validate move number is in ascending order
+                    if (moveNumber <= lastProcessedMoveNumber) {
+                        throw new Error(`Parsing failed: Move numbers must be in strict ascending order. Found move ${moveNumber} after move ${lastProcessedMoveNumber}.`);
+                    }
+                    
+                    // Check for gaps in move numbers
+                    if (moveNumber > lastProcessedMoveNumber + 1) {
+                        throw new Error(`Parsing failed: Move number ${moveNumber} found, but move ${lastProcessedMoveNumber + 1} is missing. Moves must be consecutive.`);
+                    }
+                    
+                    if (i + 1 >= tokens.length) {
+                        throw new Error(`Parsing failed: White move number "${token}" is not followed by a move.`);
+                    }
+                    
+                    const nextToken = tokens[i + 1];
+                    
+                    // Check if next token is a move number pattern
+                    if (nextToken.match(/^\d+\.\.?\.?$/)) {
+                        throw new Error(`Parsing failed: White move number "${token}" is followed by another move number "${nextToken}" instead of a move.`);
+                    }
+                    
+                    // It's a white move
+                    const whiteMove = nextToken;
+                    
+                    if (!moveMap.has(moveNumber)) {
+                        moveMap.set(moveNumber, { moveNumber, whiteMove, blackMove: null });
+                    } else {
+                        throw new Error(`Parsing failed: Duplicate white move number ${moveNumber} found.`);
+                    }
+                    
+                    lastProcessedMoveNumber = moveNumber;
+                    i += 2; // Skip move number and white move
+                    
+                    // Check if there's a black move immediately after
+                    if (i < tokens.length) {
+                        const potentialBlackMove = tokens[i];
                         
-                        // Check if next token is a move number pattern (like "2." or "1..." or "2...")
-                        // But NOT if it's the same number with three dots (that's handled above)
-                        if (!nextToken.match(/^\d+\.\.?\.?$/)) {
-                            // It's a white move
-                            const whiteMove = nextToken;
-                            
-                            if (!moveMap.has(moveNumber)) {
-                                moveMap.set(moveNumber, { moveNumber, whiteMove, blackMove: null });
-                            } else {
-                                moveMap.get(moveNumber).whiteMove = whiteMove;
-                            }
-                            
-                            i += 2; // Skip move number and white move
-                            
-                            // Check if there's a black move immediately after
-                            if (i < tokens.length) {
-                                const potentialBlackMove = tokens[i];
-                                
-                                // If it's not a move number pattern, it might be a black move
-                                if (!potentialBlackMove.match(/^\d+\.\.?\.?$/)) {
-                                    moveMap.get(moveNumber).blackMove = potentialBlackMove;
-                                    i++;
-                                }
-                            }
-                            continue;
+                        // If it's not a move number pattern, it might be a black move
+                        if (!potentialBlackMove.match(/^\d+\.\.?\.?$/)) {
+                            moveMap.get(moveNumber).blackMove = potentialBlackMove;
+                            i++;
                         }
                     }
+                    continue;
+                }
+
+                // If we encounter a token that doesn't match any expected pattern
+                if (token.match(/^\d+\.\.?\.?$/)) {
+                    throw new Error(`Parsing failed: Invalid move number format "${token}". Expected format: "N." for white moves or "N..." for black moves.`);
+                }
+                
+                // Skip unexpected tokens that might be part of game outcome or other valid text
+                // But if we're in the middle of parsing moves, this is an error
+                if (i > 0 && tokens[i - 1].match(/^\d+\.$/)) {
+                    throw new Error(`Parsing failed: Unexpected token "${token}" found after move number.`);
                 }
 
                 i++;
@@ -329,8 +378,18 @@
             const sortedMoves = Array.from(moveMap.values())
                 .sort((a, b) => a.moveNumber - b.moveNumber);
 
-            // Filter out moves that don't have at least a white move
-            return sortedMoves.filter(move => move.whiteMove !== null);
+            // Validate that we have at least one move
+            if (sortedMoves.length === 0) {
+                throw new Error('Parsing failed: No valid moves found in the PGN notation.');
+            }
+
+            // Validate all moves have white moves
+            const movesWithoutWhite = sortedMoves.filter(move => !move.whiteMove);
+            if (movesWithoutWhite.length > 0) {
+                throw new Error(`Parsing failed: Found ${movesWithoutWhite.length} move(s) without white moves.`);
+            }
+
+            return sortedMoves;
         }
 
         function generateMoveRows() {
@@ -351,7 +410,17 @@
                 return;
             }
 
-            const moves = parsePGN(pgnInput);
+            let moves;
+            try {
+                moves = parsePGN(pgnInput);
+            } catch (error) {
+                // Show alert with the specific error message
+                alert(error.message);
+                errorMessage.textContent = error.message;
+                errorMessage.classList.add('show');
+                movesContainer.innerHTML = '<div class="no-moves">Parsing failed. Please check the error message above and correct the PGN notation.</div>';
+                return;
+            }
 
             if (moves.length === 0) {
                 errorMessage.textContent = 'Could not parse any moves from the PGN notation. Please check the format.';
