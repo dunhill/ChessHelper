@@ -376,7 +376,7 @@
                 const whiteTimeInput = document.createElement('input');
                 whiteTimeInput.type = 'text';
                 whiteTimeInput.className = 'time-input';
-                whiteTimeInput.placeholder = 'Time (e.g., 5:30)';
+                whiteTimeInput.placeholder = 'Minutes (e.g., 90)';
                 whiteTimeInput.id = `time-white-${move.moveNumber}`;
                 
                 const blackMoveLabel = document.createElement('div');
@@ -386,7 +386,7 @@
                 const blackTimeInput = document.createElement('input');
                 blackTimeInput.type = 'text';
                 blackTimeInput.className = 'time-input';
-                blackTimeInput.placeholder = 'Time (e.g., 5:25)';
+                blackTimeInput.placeholder = 'Minutes (e.g., 85)';
                 blackTimeInput.id = `time-black-${move.moveNumber}`;
                 
                 if (!move.blackMove) {
@@ -406,6 +406,24 @@
 
             // Show the output section
             document.getElementById('output-section').style.display = 'block';
+        }
+
+        function formatTimeComment(minutes) {
+            if (!minutes || minutes.trim() === '') {
+                return '';
+            }
+            
+            const totalMinutes = parseInt(minutes);
+            if (isNaN(totalMinutes) || totalMinutes < 0) {
+                return '';
+            }
+            
+            const hours = Math.floor(totalMinutes / 60);
+            const mins = totalMinutes % 60;
+            const hoursStr = hours.toString().padStart(2, '0');
+            const minsStr = mins.toString().padStart(2, '0');
+            
+            return `{ [%clk ${hoursStr}:${minsStr}:00] }`;
         }
 
         function generateNewPGN() {
@@ -432,11 +450,40 @@
                 const whiteMove = row.querySelector('.move-label').textContent;
                 const blackMoveLabels = row.querySelectorAll('.move-label');
                 const blackMove = blackMoveLabels.length > 1 ? blackMoveLabels[1].textContent : null;
-
+                
+                // Get time inputs
+                const whiteTimeInput = document.getElementById(`time-white-${moveNumber}`);
+                const blackTimeInput = document.getElementById(`time-black-${moveNumber}`);
+                const whiteTime = whiteTimeInput ? whiteTimeInput.value.trim() : '';
+                const blackTime = blackTimeInput ? blackTimeInput.value.trim() : '';
+                
+                // Format white move with optional time comment
+                let whiteMoveText = `${moveNumber}. ${whiteMove}`;
+                const whiteTimeComment = formatTimeComment(whiteTime);
+                if (whiteTimeComment) {
+                    whiteMoveText += ' ' + whiteTimeComment;
+                }
+                
+                // Format black move
                 if (blackMove && blackMove !== '-') {
-                    movesText.push(`${moveNumber}. ${whiteMove} ${blackMove}`);
+                    let blackMoveText = '';
+                    
+                    // If white move has a time comment, use "1... e5" format
+                    if (whiteTimeComment) {
+                        blackMoveText = `${moveNumber}... ${blackMove}`;
+                    } else {
+                        blackMoveText = blackMove;
+                    }
+                    
+                    // Add black time comment if provided
+                    const blackTimeComment = formatTimeComment(blackTime);
+                    if (blackTimeComment) {
+                        blackMoveText += ' ' + blackTimeComment;
+                    }
+                    
+                    movesText.push(whiteMoveText + ' ' + blackMoveText);
                 } else {
-                    movesText.push(`${moveNumber}. ${whiteMove}`);
+                    movesText.push(whiteMoveText);
                 }
             });
 
