@@ -298,6 +298,7 @@
       <label for="loadPresetList" style="display:block; margin-bottom:4px; font-size:13px;">Select preset:</label>
       <select id="loadPresetList" size="10" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;"></select>
       <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="loadPresetDelete" type="button" style="background-color:#dc3545;">Delete</button>
         <button id="loadPresetCancel" type="button">Abbrechen</button>
         <button id="loadPresetLoad" type="button">Load</button>
       </div>
@@ -1718,6 +1719,7 @@
       const loadPresetLink = document.getElementById('loadFromPresetLink');
       const overlay = document.getElementById('loadPresetModalOverlay');
       const cancelBtn = document.getElementById('loadPresetCancel');
+      const deleteBtn = document.getElementById('loadPresetDelete');
       const loadBtn = document.getElementById('loadPresetLoad');
       const presetList = document.getElementById('loadPresetList');
 
@@ -1736,8 +1738,10 @@
           option.disabled = true;
           presetList.appendChild(option);
           loadBtn.disabled = true;
+          if (deleteBtn) deleteBtn.disabled = true;
         } else {
           loadBtn.disabled = false;
+          if (deleteBtn) deleteBtn.disabled = !presetList.value;
           presetNames.forEach(name => {
             const option = document.createElement('option');
             option.value = name;
@@ -1751,8 +1755,16 @@
         e.preventDefault();
         populateLoadPresetList();
         presetList.value = '';
+        if (deleteBtn) deleteBtn.disabled = true;
         overlay.style.display = 'flex';
         if (presetList) presetList.focus();
+      });
+
+      // Enable/disable delete button based on selection
+      presetList.addEventListener('change', () => {
+        if (deleteBtn) {
+          deleteBtn.disabled = !presetList.value;
+        }
       });
 
       cancelBtn.addEventListener('click', () => {
@@ -1773,6 +1785,36 @@
         if (e.key === 'Escape' && overlay.style.display === 'flex') {
           overlay.style.display = 'none';
           if (loadPresetLink) loadPresetLink.focus();
+        }
+      });
+
+      deleteBtn.addEventListener('click', () => {
+        const selectedPresetName = presetList.value;
+        
+        if (!selectedPresetName) {
+          alert('Bitte einen Preset zum Löschen auswählen.');
+          return;
+        }
+        
+        // Confirm deletion
+        if (!confirm(`Möchten Sie den Preset "${selectedPresetName}" wirklich löschen?`)) {
+          return;
+        }
+        
+        // Load presets, delete the selected one, and save back
+        const presets = loadPresets();
+        if (presets[selectedPresetName]) {
+          delete presets[selectedPresetName];
+          savePresets(presets);
+          
+          // Refresh the list
+          populateLoadPresetList();
+          presetList.value = '';
+          if (deleteBtn) deleteBtn.disabled = true;
+          
+          alert(`Preset "${selectedPresetName}" wurde gelöscht.`);
+        } else {
+          alert(`Preset "${selectedPresetName}" nicht gefunden.`);
         }
       });
 
