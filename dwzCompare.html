@@ -174,7 +174,8 @@
 
   <div style="display:flex; align-items:center; gap:8px;">
     <label for="pkz" style="margin-right:6px;">Spieler-IDs (kommagetrennt):</label>
-    <a id="addTopPlayersLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
+    <a id="addByNameLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add by name</a>
+    <a id="addTopPlayersLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
     <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
     <a id="addFromHistoryLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from history</a>
     <a id="saveToPresetLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Save to Preset</a>
@@ -301,6 +302,25 @@
         <button id="loadPresetDelete" type="button" style="background-color:#dc3545;">Delete</button>
         <button id="loadPresetCancel" type="button">Abbrechen</button>
         <button id="loadPresetLoad" type="button">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add by Name modal -->
+  <div id="addByNameModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10005;">
+    <div id="addByNameModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:600px; max-width:calc(100% - 32px); max-height:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2); display:flex; flex-direction:column;">
+      <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Add by Name</h3>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input id="addByNameInput" type="text" placeholder="Enter player name" style="flex:1; padding:6px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;">
+        <button id="addByNameSearch" type="button">Search</button>
+      </div>
+      <label for="addByNameResults" style="display:block; margin-bottom:4px; font-size:13px;">Search results:</label>
+      <div id="addByNameResults" style="width:100%; max-height:400px; overflow-y:auto; border:1px solid #ddd; padding:6px; box-sizing:border-box; background:#fff;">
+        <div style="text-align:center; color:#666; padding:20px;">Enter a name and click Search</div>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="addByNameCancel" type="button">Abbrechen</button>
+        <button id="addByNameConfirm" type="button" disabled>Confirm</button>
       </div>
     </div>
   </div>
@@ -1847,6 +1867,247 @@
         // Close modal
         overlay.style.display = 'none';
         if (loadPresetLink) loadPresetLink.focus();
+      });
+    })();
+
+    // === Add by Name modal handling ===
+    (function () {
+      const addByNameLink = document.getElementById('addByNameLink');
+      const overlay = document.getElementById('addByNameModalOverlay');
+      const cancelBtn = document.getElementById('addByNameCancel');
+      const searchBtn = document.getElementById('addByNameSearch');
+      const confirmBtn = document.getElementById('addByNameConfirm');
+      const nameInput = document.getElementById('addByNameInput');
+      const resultsDiv = document.getElementById('addByNameResults');
+      
+      let selectedPlayerId = null;
+      let searchResults = [];
+
+      if (!overlay || !addByNameLink || !nameInput || !resultsDiv) return;
+
+      // Function to fetch player DWZ data
+      async function fetchPlayerDWZData(pkz) {
+        try {
+          const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
+          const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+          const response = await fetch(corsUrl);
+          if (!response.ok) return null;
+          const csv = await response.text();
+          const rows = csv.trim().split('\n').map(r => r.split('|'));
+          
+          // Get player name from second row, third column
+          const playerName = rows[1]?.[2]?.trim() || '';
+          // Get birth year from FIDE ID (row 2, column 7)
+          const fideRaw = rows[1]?.[6]?.trim();
+          const fideMatch = fideRaw ? fideRaw.match(/\d+/) : null;
+          const fideId = fideMatch ? fideMatch[0] : '';
+          
+          let birthYear = null;
+          if (fideId) {
+            try {
+              birthYear = await fetchFideBirthYear(fideId);
+            } catch (e) {
+              // ignore errors
+            }
+          }
+          
+          // Find DWZneu column index
+          const headerIndex = rows.findIndex(r => r[0] && r[0].trim().toLowerCase() === 'turniercode');
+          if (headerIndex === -1) return null;
+          const headers = rows[headerIndex] || [];
+          const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
+          
+          // Get latest DWZ (last row with valid DWZ)
+          let currentDWZ = null;
+          for (let i = rows.length - 1; i > headerIndex; i--) {
+            const dwzValue = dwzIndex >= 0 && rows[i] && rows[i][dwzIndex] ? parseInt((rows[i][dwzIndex] || '').trim(), 10) : NaN;
+            if (!isNaN(dwzValue)) {
+              currentDWZ = dwzValue;
+              break;
+            }
+          }
+          
+          return {
+            pkz,
+            name: playerName,
+            birthYear: birthYear,
+            currentDWZ: currentDWZ
+          };
+        } catch (err) {
+          console.error('Error fetching player DWZ data:', err);
+          return null;
+        }
+      }
+
+      // Function to render search results
+      function renderResults(results) {
+        if (results.length === 0) {
+          resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">No players found</div>';
+          confirmBtn.disabled = true;
+          return;
+        }
+        
+        let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+        html += '<thead><tr style="background:#f0f0f0; border-bottom:2px solid #ddd;">';
+        html += '<th style="padding:6px; text-align:left;">ID</th>';
+        html += '<th style="padding:6px; text-align:left;">Name</th>';
+        html += '<th style="padding:6px; text-align:left;">Birth Year</th>';
+        html += '<th style="padding:6px; text-align:left;">Current DWZ</th>';
+        html += '</tr></thead><tbody>';
+        
+        results.forEach((result, index) => {
+          const isSelected = selectedPlayerId === result.pkz;
+          html += `<tr style="cursor:pointer; border-bottom:1px solid #eee; ${isSelected ? 'background:#e3f2fd;' : ''}" data-pkz="${result.pkz}" data-index="${index}">`;
+          html += `<td style="padding:6px;">${result.pkz}</td>`;
+          html += `<td style="padding:6px;">${result.name || '-'}</td>`;
+          html += `<td style="padding:6px;">${result.birthYear || '-'}</td>`;
+          html += `<td style="padding:6px;">${result.currentDWZ || '-'}</td>`;
+          html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        resultsDiv.innerHTML = html;
+        
+        // Add click handlers to rows
+        resultsDiv.querySelectorAll('tbody tr').forEach(row => {
+          row.addEventListener('click', () => {
+            // Remove previous selection
+            resultsDiv.querySelectorAll('tbody tr').forEach(r => {
+              r.style.background = '';
+            });
+            // Highlight selected row
+            row.style.background = '#e3f2fd';
+            selectedPlayerId = row.dataset.pkz;
+            confirmBtn.disabled = false;
+          });
+        });
+      }
+
+      addByNameLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        nameInput.value = '';
+        resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Enter a name and click Search</div>';
+        selectedPlayerId = null;
+        searchResults = [];
+        confirmBtn.disabled = true;
+        overlay.style.display = 'flex';
+        if (nameInput) nameInput.focus();
+      });
+
+      // Allow Enter key to trigger search
+      nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          searchBtn.click();
+        }
+      });
+
+      searchBtn.addEventListener('click', async () => {
+        const searchName = (nameInput.value || '').trim();
+        if (!searchName) {
+          alert('Bitte einen Namen eingeben.');
+          return;
+        }
+        
+        resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Searching...</div>';
+        confirmBtn.disabled = true;
+        selectedPlayerId = null;
+        
+        try {
+          // Load CSV and search for matching names
+          const csvMap = await loadSpielerCsv();
+          const normalizedSearch = normalizeSpielerName(searchName);
+          const matches = [];
+          
+          // Search for exact matches first
+          for (const [normalizedName, id] of csvMap.entries()) {
+            if (normalizedName.includes(normalizedSearch) || normalizedSearch.includes(normalizedName)) {
+              matches.push({ pkz: id, normalizedName });
+            }
+          }
+          
+          // Also try fuzzy matching with umlauts
+          const fuzzyPattern = createUmlautFuzzyPattern(searchName);
+          if (fuzzyPattern) {
+            for (const [normalizedName, id] of csvMap.entries()) {
+              if (fuzzyPattern.test(normalizedName) && !matches.find(m => m.pkz === id)) {
+                matches.push({ pkz: id, normalizedName });
+              }
+            }
+          }
+          
+          // Limit to first 20 matches to avoid too many API calls
+          const limitedMatches = matches.slice(0, 20);
+          
+          if (limitedMatches.length === 0) {
+            resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">No players found</div>';
+            return;
+          }
+          
+          // Fetch DWZ data for each match
+          resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Loading player data...</div>';
+          const results = [];
+          for (const match of limitedMatches) {
+            const playerData = await fetchPlayerDWZData(match.pkz);
+            if (playerData) {
+              results.push(playerData);
+            }
+          }
+          
+          searchResults = results;
+          renderResults(results);
+        } catch (err) {
+          console.error('Error searching for players:', err);
+          resultsDiv.innerHTML = '<div style="text-align:center; color:red; padding:20px;">Error searching for players. See console for details.</div>';
+        }
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        if (addByNameLink) addByNameLink.focus();
+      });
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (addByNameLink) addByNameLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (addByNameLink) addByNameLink.focus();
+        }
+      });
+
+      confirmBtn.addEventListener('click', () => {
+        if (!selectedPlayerId) {
+          alert('Bitte einen Spieler auswählen.');
+          return;
+        }
+        
+        // Add player ID to the pkz input field
+        const pkzInput = document.getElementById('pkz');
+        if (!pkzInput) {
+          alert('Spieler-IDs Eingabefeld nicht gefunden.');
+          return;
+        }
+        
+        const currentValue = (pkzInput.value || '').trim();
+        const currentIds = currentValue ? currentValue.split(',').map(id => id.trim()).filter(Boolean) : [];
+        
+        // Add new ID if not already present
+        if (!currentIds.includes(selectedPlayerId)) {
+          currentIds.push(selectedPlayerId);
+          pkzInput.value = currentIds.join(',');
+        }
+        
+        // Close modal
+        overlay.style.display = 'none';
+        if (addByNameLink) addByNameLink.focus();
       });
     })();
   </script>
