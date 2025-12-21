@@ -14,6 +14,10 @@ Written with ChatGPT.
 * Can load only last X months
 * Caches tournament dates in the browser local cache to minimize the calls to DWZ website
 
+#### Presets
+* **Save to Preset**: Allows saving the current list of selected players as a named preset. Users can either enter a new preset name or select an existing preset to overwrite. Presets are stored in the browser's local storage.
+* **Load from Preset**: Allows loading a previously saved preset, replacing the current player list with the preset's player list. Users select a preset from a list of all saved presets.
+
 #### Player Name-ID mapping
 The mapping from Player Name to their DWZ ID needs to fetched manually from https://www.schachbund.de/dwz-archiv-downloads-dsb.html, e.g. https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip
 

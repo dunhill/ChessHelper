@@ -177,6 +177,8 @@
     <a id="addTopPlayersLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
     <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
     <a id="addFromHistoryLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from history</a>
+    <a id="saveToPresetLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Save to Preset</a>
+    <a id="loadFromPresetLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Load from Preset</a>
   </div>
   <input type="text" id="pkz" placeholder="z. B. 12345,67890">
 
@@ -270,6 +272,34 @@
       <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
         <button id="historyCancel" type="button">Abbrechen</button>
         <button id="historyAdd" type="button">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save to Preset modal -->
+  <div id="presetModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10003;">
+    <div id="presetModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:480px; max-width:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Save to Preset</h3>
+      <label for="presetNameInput" style="display:block; margin-bottom:4px; font-size:13px;">Preset name (or select existing):</label>
+      <input id="presetNameInput" type="text" placeholder="Enter new preset name" style="width:100%; padding:6px; margin-top:4px; margin-bottom:12px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;">
+      <label for="presetList" style="display:block; margin-bottom:4px; font-size:13px;">Or select existing preset:</label>
+      <select id="presetList" size="8" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;"></select>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="presetCancel" type="button">Abbrechen</button>
+        <button id="presetSave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load from Preset modal -->
+  <div id="loadPresetModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10004;">
+    <div id="loadPresetModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:480px; max-width:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Load from Preset</h3>
+      <label for="loadPresetList" style="display:block; margin-bottom:4px; font-size:13px;">Select preset:</label>
+      <select id="loadPresetList" size="10" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;"></select>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="loadPresetCancel" type="button">Abbrechen</button>
+        <button id="loadPresetLoad" type="button">Load</button>
       </div>
     </div>
   </div>
@@ -483,6 +513,7 @@
     const MONTHS_KEY = 'ch_months_v1';
     const PLAYER_CACHE_KEY = 'ch_players_v1';
     const TOP_PLAYERS_SETTINGS_KEY = 'ch_top_players_settings_v1';
+    const PRESETS_KEY = 'ch_presets_v1';
     // load/save helpers for pkz -> birth year cache
     function loadPkzYearCache() {
       try { return JSON.parse(localStorage.getItem(PKZ_YEAR_CACHE_KEY) || '{}'); }
@@ -533,6 +564,20 @@
     function saveTopPlayersSettings(settings) {
       try {
         localStorage.setItem(TOP_PLAYERS_SETTINGS_KEY, JSON.stringify(settings));
+      } catch (e) { /* ignore */ }
+    }
+
+    // load/save helpers for presets
+    function loadPresets() {
+      try {
+        const stored = localStorage.getItem(PRESETS_KEY);
+        if (!stored) return {};
+        return JSON.parse(stored);
+      } catch (e) { return {}; }
+    }
+    function savePresets(presets) {
+      try {
+        localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
       } catch (e) { /* ignore */ }
     }
 
@@ -1548,6 +1593,218 @@
         // Close modal
         overlay.style.display = 'none';
         if (historyLink) historyLink.focus();
+      });
+    })();
+
+    // === Save to Preset modal handling ===
+    (function () {
+      const presetLink = document.getElementById('saveToPresetLink');
+      const overlay = document.getElementById('presetModalOverlay');
+      const cancelBtn = document.getElementById('presetCancel');
+      const saveBtn = document.getElementById('presetSave');
+      const presetNameInput = document.getElementById('presetNameInput');
+      const presetList = document.getElementById('presetList');
+
+      if (!overlay || !presetLink || !presetNameInput || !presetList) return;
+
+      // Function to populate the preset list
+      function populatePresetList() {
+        const presets = loadPresets();
+        presetList.innerHTML = '';
+        
+        const presetNames = Object.keys(presets).sort();
+        
+        if (presetNames.length === 0) {
+          const option = document.createElement('option');
+          option.textContent = '(No presets saved)';
+          option.disabled = true;
+          presetList.appendChild(option);
+        } else {
+          presetNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            presetList.appendChild(option);
+          });
+        }
+      }
+
+      // Handle preset list selection - populate input field
+      presetList.addEventListener('change', () => {
+        const selected = presetList.value;
+        if (selected) {
+          presetNameInput.value = selected;
+        }
+      });
+
+      // Handle input field changes - clear list selection if user types
+      presetNameInput.addEventListener('input', () => {
+        if (presetNameInput.value && presetList.value !== presetNameInput.value) {
+          presetList.value = '';
+        }
+      });
+
+      presetLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        populatePresetList();
+        presetNameInput.value = '';
+        presetList.value = '';
+        overlay.style.display = 'flex';
+        if (presetNameInput) presetNameInput.focus();
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        if (presetLink) presetLink.focus();
+      });
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (presetLink) presetLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (presetLink) presetLink.focus();
+        }
+      });
+
+      saveBtn.addEventListener('click', () => {
+        const presetName = (presetNameInput.value || '').trim();
+        
+        if (!presetName) {
+          alert('Bitte einen Preset-Namen angeben.');
+          return;
+        }
+        
+        // Get current player IDs from the pkz input
+        const pkzInput = document.getElementById('pkz');
+        if (!pkzInput) {
+          alert('Spieler-IDs Eingabefeld nicht gefunden.');
+          return;
+        }
+        
+        const currentValue = (pkzInput.value || '').trim();
+        if (!currentValue) {
+          alert('Keine Spieler-IDs zum Speichern vorhanden.');
+          return;
+        }
+        
+        const playerIds = currentValue.split(',').map(id => id.trim()).filter(Boolean);
+        if (playerIds.length === 0) {
+          alert('Keine gültigen Spieler-IDs zum Speichern vorhanden.');
+          return;
+        }
+        
+        // Load existing presets and save new/updated preset
+        const presets = loadPresets();
+        presets[presetName] = playerIds.join(',');
+        savePresets(presets);
+        
+        // Close modal and show confirmation
+        overlay.style.display = 'none';
+        alert(`Preset "${presetName}" wurde gespeichert.`);
+        if (presetLink) presetLink.focus();
+      });
+    })();
+
+    // === Load from Preset modal handling ===
+    (function () {
+      const loadPresetLink = document.getElementById('loadFromPresetLink');
+      const overlay = document.getElementById('loadPresetModalOverlay');
+      const cancelBtn = document.getElementById('loadPresetCancel');
+      const loadBtn = document.getElementById('loadPresetLoad');
+      const presetList = document.getElementById('loadPresetList');
+
+      if (!overlay || !loadPresetLink || !presetList) return;
+
+      // Function to populate the preset list
+      function populateLoadPresetList() {
+        const presets = loadPresets();
+        presetList.innerHTML = '';
+        
+        const presetNames = Object.keys(presets).sort();
+        
+        if (presetNames.length === 0) {
+          const option = document.createElement('option');
+          option.textContent = '(No presets saved)';
+          option.disabled = true;
+          presetList.appendChild(option);
+          loadBtn.disabled = true;
+        } else {
+          loadBtn.disabled = false;
+          presetNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            presetList.appendChild(option);
+          });
+        }
+      }
+
+      loadPresetLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        populateLoadPresetList();
+        presetList.value = '';
+        overlay.style.display = 'flex';
+        if (presetList) presetList.focus();
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        if (loadPresetLink) loadPresetLink.focus();
+      });
+
+      // Close when clicking outside the modal content (on overlay)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.style.display = 'none';
+          if (loadPresetLink) loadPresetLink.focus();
+        }
+      });
+
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+          if (loadPresetLink) loadPresetLink.focus();
+        }
+      });
+
+      loadBtn.addEventListener('click', () => {
+        const selectedPresetName = presetList.value;
+        
+        if (!selectedPresetName) {
+          alert('Bitte einen Preset auswählen.');
+          return;
+        }
+        
+        // Load presets and get the selected preset
+        const presets = loadPresets();
+        const playerIds = presets[selectedPresetName];
+        
+        if (!playerIds) {
+          alert(`Preset "${selectedPresetName}" nicht gefunden.`);
+          return;
+        }
+        
+        // Replace the current player list with the preset's player list
+        const pkzInput = document.getElementById('pkz');
+        if (!pkzInput) {
+          alert('Spieler-IDs Eingabefeld nicht gefunden.');
+          return;
+        }
+        
+        pkzInput.value = playerIds;
+        
+        // Close modal
+        overlay.style.display = 'none';
+        if (loadPresetLink) loadPresetLink.focus();
       });
     })();
   </script>
