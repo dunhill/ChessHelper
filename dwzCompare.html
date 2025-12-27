@@ -312,7 +312,7 @@
       <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Add by Name</h3>
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <input id="addByNameInput" type="text" placeholder="Enter player name" style="flex:1; padding:6px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;">
-        <button id="addByNameSearch" type="button">Search</button>
+        <button id="addByNameSearch" type="button" style="width:80px; flex-shrink:0;">Search</button>
       </div>
       <label for="addByNameResults" style="display:block; margin-bottom:4px; font-size:13px;">Search results:</label>
       <div id="addByNameResults" style="width:100%; max-height:400px; overflow-y:auto; border:1px solid #ddd; padding:6px; box-sizing:border-box; background:#fff;">
@@ -1901,7 +1901,7 @@
           const fideRaw = rows[1]?.[6]?.trim();
           const fideMatch = fideRaw ? fideRaw.match(/\d+/) : null;
           const fideId = fideMatch ? fideMatch[0] : '';
-          
+
           let birthYear = null;
           if (fideId) {
             try {
