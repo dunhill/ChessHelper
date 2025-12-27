@@ -314,7 +314,7 @@
         <input id="addByNameInput" type="text" placeholder="Enter player name" style="flex:1; padding:6px; box-sizing:border-box; border:1px solid #ddd; font-size:13px;">
         <button id="addByNameSearch" type="button" style="width:80px; flex-shrink:0;">Search</button>
       </div>
-      <label for="addByNameResults" style="display:block; margin-bottom:4px; font-size:13px;">Search results:</label>
+      <label for="addByNameResults" style="display:block; margin-bottom:4px; font-size:13px;">Search results (max 20):</label>
       <div id="addByNameResults" style="width:100%; max-height:400px; overflow-y:auto; border:1px solid #ddd; padding:6px; box-sizing:border-box; background:#fff;">
         <div style="text-align:center; color:#666; padding:20px;">Enter a name and click Search</div>
       </div>
@@ -2017,21 +2017,28 @@
           // Load CSV and search for matching names
           const csvMap = await loadSpielerCsv();
           const normalizedSearch = normalizeSpielerName(searchName);
+          const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 0);
           const matches = [];
           
-          // Search for exact matches first
+          // Search for names that contain ALL words from the search input
           for (const [normalizedName, id] of csvMap.entries()) {
-            if (normalizedName.includes(normalizedSearch) || normalizedSearch.includes(normalizedName)) {
+            const allWordsPresent = searchWords.every(word => normalizedName.includes(word));
+            if (allWordsPresent) {
               matches.push({ pkz: id, normalizedName });
+              if (matches.length >= 20) break; // Limit to 20 matches
             }
           }
           
-          // Also try fuzzy matching with umlauts
-          const fuzzyPattern = createUmlautFuzzyPattern(searchName);
-          if (fuzzyPattern) {
-            for (const [normalizedName, id] of csvMap.entries()) {
-              if (fuzzyPattern.test(normalizedName) && !matches.find(m => m.pkz === id)) {
-                matches.push({ pkz: id, normalizedName });
+          // Also try fuzzy matching with umlauts if no exact matches found
+          if (matches.length === 0) {
+            const fuzzyPattern = createUmlautFuzzyPattern(searchName);
+            if (fuzzyPattern) {
+              // Search through all map keys for a match
+              for (const [normalizedName, id] of csvMap.entries()) {
+                if (fuzzyPattern.test(normalizedName)) {
+                  matches.push({ pkz: id, normalizedName });
+                  if (matches.length >= 20) break; // Limit to 20 matches
+                }
               }
             }
           }
