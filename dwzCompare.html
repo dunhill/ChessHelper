@@ -384,7 +384,7 @@
       pattern = pattern.replace(new RegExp(placeholder, 'g'), '.');
       
       try {
-        return new RegExp('^' + pattern + '$', 'i');
+        return new RegExp(pattern, 'i');
       } catch (e) {
         console.warn('Failed to create fuzzy pattern for:', searchName, e);
         return null;
@@ -2020,6 +2020,7 @@
           const csvMap = await loadSpielerCsv();
           const normalizedSearch = normalizeSpielerName(searchName);
           const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 0);
+          console.log('Searching for:', normalizedSearch, 'Words:', searchWords);
           const matches = [];
           
           // Search for names that contain ALL words from the search input
@@ -2040,6 +2041,7 @@
           if (matches.length === 0) {
             const fuzzyPattern = createUmlautFuzzyPattern(searchName);
             if (fuzzyPattern) {
+              console.log('No exact matches, trying fuzzy pattern:', fuzzyPattern);
               // Search through all map keys for a match
               for (const [normalizedName, playerInfo] of csvMap.entries()) {
                 if (fuzzyPattern.test(normalizedName)) {
