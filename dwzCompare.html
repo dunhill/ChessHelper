@@ -1479,6 +1479,10 @@
             return;
           }
           
+          // apply max count limit if provided (>0)
+          const maxCountEl = document.getElementById('crMaxCount');
+          const maxCount = maxCountEl ? (parseInt(maxCountEl.value, 10) || 0) : 0;
+
           let names = [];
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -1487,15 +1491,13 @@
             const cells = Array.from(row.querySelectorAll('td'));
             if (cells.length <= nameColumnIndex) continue;
             const name = (cells[nameColumnIndex].textContent || '').trim();
-            if (name) names.push(name);
-          }
-
-          // apply max count limit if provided (>0)
-          const maxCountEl = document.getElementById('crMaxCount');
-          const maxCount = maxCountEl ? (parseInt(maxCountEl.value, 10) || 0) : 0;
-          if (maxCount > 0 && names.length > maxCount) {
-            names = names.slice(0, maxCount);
-            console.log(`Truncated chess-results names to first ${maxCount} entries.`);
+            if (name) { 
+              names.push(name);
+              console.log('Player found:', name);
+              if (maxCount > 0 && names.length >= maxCount) {
+                break;
+              }
+            }
           }
 
           if (names.length === 0) {
