@@ -364,7 +364,7 @@
       
       // Only create fuzzy pattern if the original string contains umlauts
       // This avoids false positives when searching for names without umlauts
-      const hasUmlaut = /[äöüÄÖÜ]/.test(searchName);
+      const hasUmlaut = /[äöüÄÖÜß]/.test(searchName);
       if (!hasUmlaut) return new RegExp(searchName, 'i');
       
       // Use a placeholder that won't appear in names to mark umlaut positions
@@ -2021,28 +2021,28 @@
           // Load CSV and search for matching names
           const csvMap = await loadSpielerCsv();
           const searchWords = searchName.split(/[\s.,:;]+/i).filter(w => w.length > 0);
-          const normalizedSearchWords = searchWords.map(w => normalizeSpielerName(w));
-          console.log('Searching for:', searchName, 'Normlalized words:', normalizedSearchWords);
           const matches = [];
           
           // Search for names that contain ALL words from the search input
-          for (const [normalizedName, playerInfo] of csvMap.entries()) {
-            const allWordsPresent = normalizedSearchWords.every(word => normalizedName.includes(word));
-            if (allWordsPresent) {
-              matches.push({
-                pkz: playerInfo.id,
-                normalizedName,
-                birthYear: playerInfo.birthYear,
-                currentDWZ: playerInfo.dwzValue
-              });
-              if (matches.length >= 20) break; // Limit to 20 matches
+          const hasUmlaut = /[äöüÄÖÜß]/.test(searchName);
+          if (!hasUmlaut) {
+            console.log('Regular search with words', searchWords);
+            for (const [normalizedName, playerInfo] of csvMap.entries()) {
+              const allWordsPresent = searchWords.every(word => normalizedName.includes(word));
+              if (allWordsPresent) {
+                matches.push({
+                  pkz: playerInfo.id,
+                  normalizedName,
+                  birthYear: playerInfo.birthYear,
+                  currentDWZ: playerInfo.dwzValue
+                });
+                if (matches.length >= 20) break; // Limit to 20 matches
+              }
             }
-          }
-          
-          // Also try fuzzy matching with umlauts if no exact matches found
-          if (matches.length === 0) {
+          } else {
+            // Also try fuzzy matching with umlauts if no exact matches found
             const fuzzyPatterns = searchWords.map(w => createUmlautFuzzyPattern(w));
-            console.log('No exact matches, trying fuzzy pattern:', fuzzyPatterns);
+            console.log('Fuzzy search with patterns:', fuzzyPatterns);
             // Search through all map keys for a match
             for (const [normalizedName, playerInfo] of csvMap.entries()) {
               if (fuzzyPatterns.every(p => p.test(normalizedName))) {
@@ -2056,7 +2056,8 @@
               }
             }
           }
-          
+          console.log('Found players:', matches.length);
+
           if (matches.length === 0) {
             resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">No players found</div>';
             return;
