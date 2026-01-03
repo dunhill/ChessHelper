@@ -1,6 +1,11 @@
 # ChessHelper
 Helper tools and scripts for chess
 
+## Todo
+* create app to collect statistics of player's mistakes per game stage (opening, middle game, endspiel) and average centipawns per opponents DWZ rating. Use lichess API or any other open API for chess game analysis. Take the games from the official DEM, DVM, DLM sources
+* add save/merge browser cache
+* publish the app on the web
+
 ## dwzCompare
 Shows the DWZ progress for multiple players on the same chart.
 Written with ChatGPT.
@@ -27,9 +32,6 @@ The mapping from Player Name to their DWZ ID needs to fetched manually from http
 * Can toggle visibility of individual players on the chart
 * Can adjust the timeline to the age of the players. Usefull to compare DWZ progres when players were at the same age
 * Shows the cache usage and the total number of tournaments in the cache
-
-### Todo
-* Cache local location of the player-ID mapping file and automaticaly use it when needed
 
 ## Chess Time Entry
 
