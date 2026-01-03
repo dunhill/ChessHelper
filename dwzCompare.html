@@ -172,8 +172,9 @@
 <body>
   <h1>DWZ-Verlauf mehrerer Spieler</h1>
 
+  <label for="pkz" style="margin-right:6px;">Spieler Info:</label>
   <div style="display:flex; align-items:center; gap:8px;">
-    <label for="pkz" style="margin-right:6px;">Spieler-IDs (kommagetrennt):</label>
+    <a id="clearAllBtn" href="#" style="margin-right:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Clear all</button>
     <a id="addByNameLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add by name</a>
     <a id="addTopPlayersLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
     <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
@@ -181,7 +182,25 @@
     <a id="saveToPresetLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Save to Preset</a>
     <a id="loadFromPresetLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Load from Preset</a>
   </div>
-  <input type="text" id="pkz" placeholder="z. B. 12345,67890">
+
+  <!-- Replaced editable input with a read-only table showing players (IDs only populated for step 1).
+     A hidden input#pkz is kept for backwards compatibility with existing JS. -->
+  <div id="pkzContainer" style="margin-top:8px; width:100%; max-width:640px;">
+    <table id="pkzTable" aria-label="Spieler Liste" style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:6px;">ID</th>
+          <th style="text-align:left; padding:6px;">Name</th>
+          <th style="text-align:left; padding:6px;">YoB</th>
+          <th style="text-align:left; padding:6px;">DWZ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>
+      </tbody>
+    </table>
+    <input type="hidden" id="pkz" value="">
+  </div>
 
   <!-- Months control: number of months to load (0 = all). Default 12 -->
   <div style="margin-top:8px; max-width:320px;">
@@ -727,7 +746,10 @@
     // restore previous input on page load
     try {
       const prev = loadPreviousInput();
-      if (prev) document.getElementById('pkz').value = prev;
+      if (prev) {
+        document.getElementById('pkz').value = prev;
+        refreshPkzTable(); // keep table in sync
+      }
       // restore saved age-adjust checkbox state
       const cb = document.getElementById('ageAdjustCheckbox');
       if (cb) cb.checked = loadAgeAdjust();
@@ -1153,6 +1175,8 @@
               pkzInput.value = names.join(',');
               console.warn(`No ${contextName} names could be resolved to IDs. See console for details.`);
             }
+            // refresh visible table
+            refreshPkzTable();
           }
         }
         
@@ -1161,7 +1185,10 @@
         console.error(`Error converting ${contextName} names to IDs:`, err);
         if (updateInput) {
           const pkzInput = document.getElementById('pkz');
-          if (pkzInput) pkzInput.value = names.join(',');
+          if (pkzInput) {
+            pkzInput.value = names.join(',');
+            refreshPkzTable();
+          }
         }
         return { mapped: [], notFound: names };
       }
@@ -1321,6 +1348,65 @@
       cb.addEventListener('change', () => {
         saveAgeAdjust(cb.checked);
         if (lastPlayers) renderChartFromPlayers(lastPlayers);
+      });
+    })();
+
+    // ---------------------------
+    // New: render non-editable PKZ table and keep it in sync with hidden #pkz
+    // ---------------------------
+    function refreshPkzTable() {
+      const pkzInput = document.getElementById('pkz');
+      const tbl = document.getElementById('pkzTable');
+      if (!pkzInput || !tbl) return;
+      const val = (pkzInput.value || '').trim();
+      const ids = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const tbody = tbl.querySelector('tbody');
+      tbody.innerHTML = '';
+      if (ids.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>';
+        return;
+      }
+      ids.forEach(id => {
+        const tr = document.createElement('tr');
+        const tdId = document.createElement('td');
+        tdId.textContent = id;
+        tdId.style.padding = '6px';
+        tr.appendChild(tdId);
+        // For step 1 keep other columns empty (to be filled later)
+        const tdName = document.createElement('td'); tdName.textContent = ''; tdName.style.padding = '6px'; tr.appendChild(tdName);
+        const tdYoB  = document.createElement('td'); tdYoB.textContent = ''; tdYoB.style.padding = '6px'; tr.appendChild(tdYoB);
+        const tdDWZ  = document.createElement('td'); tdDWZ.textContent = ''; tdDWZ.style.padding = '6px'; tr.appendChild(tdDWZ);
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ---------------------------
+    // New: Clear all button handler
+    // ---------------------------
+    (function () {
+      const btn = document.getElementById('clearAllBtn');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const pkz = document.getElementById('pkz');
+        if (pkz) {
+          pkz.value = '';
+          refreshPkzTable();
+          savePreviousInput('');
+        }
+        // clear player UI and chart/toggles
+        const playersContainer = document.getElementById('playersContainer');
+        if (playersContainer) playersContainer.innerHTML = '';
+        const toggles = document.getElementById('playerToggles');
+        if (toggles) toggles.innerHTML = '';
+        // destroy chart if present
+        const chartCanvas = document.getElementById('dwzChart');
+        if (chartCanvas && chartCanvas.chart) {
+          try { chartCanvas.chart.destroy(); } catch (e) { /* ignore */ }
+        }
+        lastPlayers = null;
+        // move focus back to first control
+        const firstControl = document.getElementById('addByNameLink');
+        if (firstControl) firstControl.focus();
       });
     })();
 
@@ -1947,8 +2033,7 @@
         }
         
         pkzInput.value = playerIds;
-        
-        // Close modal
+        refreshPkzTable();
         overlay.style.display = 'none';
         if (loadPresetLink) loadPresetLink.focus();
       });
@@ -2195,11 +2280,10 @@
         
         const currentValue = (pkzInput.value || '').trim();
         const currentIds = currentValue ? currentValue.split(',').map(id => id.trim()).filter(Boolean) : [];
-        
-        // Add new ID if not already present
         if (!currentIds.includes(selectedPlayerId)) {
           currentIds.push(selectedPlayerId);
           pkzInput.value = currentIds.join(',');
+          refreshPkzTable();
         }
         
         // Close modal
