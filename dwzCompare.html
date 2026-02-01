@@ -1779,6 +1779,7 @@
           // Combine current IDs with new IDs, avoiding duplicates
           const allIds = [...new Set([...currentIds, ...selectedIds])];
           pkzInput.value = allIds.join(',');
+          refreshPkzTable();
         }
         
         // Close modal
