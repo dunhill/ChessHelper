@@ -537,27 +537,6 @@
       }
     }
 
-    // Download ZIP, extract spieler.csv (case-insensitive), cache the ZIP binary, return CSV text
-    async function fetchAndExtractSpielerCsv(zipUrl) {
-      const corsUrl = `https://corsproxy.io/?${encodeURIComponent(zipUrl)}`;
-      const resp = await fetch(corsUrl);
-      if (!resp.ok) throw new Error(`ZIP download failed: ${resp.status}`);
-      const buf = await resp.arrayBuffer();
-
-      // JSZip must be present (we included it above)
-      const zip = await JSZip.loadAsync(buf);
-      // try to find a file named spieler.csv (case-insensitive) anywhere in zip
-      const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
-      if (!fileEntry) throw new Error('spieler.csv not found inside ZIP');
-      const file = zip.files[fileEntry];
-      const text = await file.async('text');
-      
-      // Cache the original ZIP binary (not the extracted text)
-      saveCachedSpielerCsv(buf);
-      
-      return text;
-    }
-
     // Reworked: promptLoadSpielerCsvFile now downloads the DWZ ZIP, extracts spieler.csv
     // and caches the ZIP binary. Falls back to file picker if download/extract fails.
     async function promptLoadSpielerCsvFile() {
@@ -571,6 +550,7 @@
             const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
             if (!fileEntry) throw new Error('spieler.csv not found inside cached ZIP');
             const text = await zip.files[fileEntry].async('text');
+            console.log('Successfully extracted spieler.csv from cached ZIP');
             return text || '';
           } catch (extractErr) {
             console.warn('Error extracting CSV from cached ZIP, will re-download', extractErr);
@@ -578,16 +558,6 @@
         }
       } catch (e) {
         console.warn('Error reading spieler.csv cache', e);
-      }
-
-      // 2) attempt download & extraction
-      try {
-        const csvText = await fetchAndExtractSpielerCsv(SPIELER_ZIP_URL);
-        if (csvText && csvText.length > 0) {
-          return csvText;
-        }
-      } catch (e) {
-        console.warn('Automatic download/extract of spieler.csv failed, falling back to file picker.', e);
       }
 
       // 3) fallback to original file-picker prompt (in case user wants to load local copy)
@@ -618,21 +588,7 @@
                 resolve(text);
                 return;
               } else {
-                // assume plain CSV - we cannot cache it as ZIP since we only store ZIP binaries
-                const reader = new FileReader();
-                reader.onload = () => {
-                  document.body.removeChild(input);
-                  const t = reader.result || '';
-                  // Don't cache plain CSV, only ZIP files are cached
-                  resolve(t || '');
-                };
-                reader.onerror = () => {
-                  document.body.removeChild(input);
-                  console.error('Error reading selected spieler.csv file');
-                  resolve(null);
-                };
-                reader.readAsText(file, 'utf-8');
-                return;
+                throw new Error('Unsupported file type. Please select a ZIP or CSV file.');
               }
             } catch (err) {
               document.body.removeChild(input);
