@@ -506,29 +506,44 @@
         const raw = localStorage.getItem(SPIELER_CSV_CACHE_KEY);
         if (!raw) return null;
         const obj = JSON.parse(raw);
-        if (!obj || !obj.csv || !obj.ts) return null;
-        return obj;
+        if (!obj || !obj.zipBase64 || !obj.ts) return null;
+        // Decode base64 back to ArrayBuffer
+        const binaryString = atob(obj.zipBase64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return { ts: obj.ts, zipBuffer: bytes.buffer };
       } catch (e) {
         console.warn('Failed to read spieler.csv cache', e);
         return null;
       }
     }
 
-    function saveCachedSpielerCsv(csvText) {
+    function saveCachedSpielerCsv(arrayBuffer) {
       try {
-        const obj = { ts: Date.now(), csv: csvText };
+        // Convert ArrayBuffer to base64 string for localStorage
+        const bytes = new Uint8Array(arrayBuffer);
+        let binaryString = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binaryString += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binaryString);
+        const obj = { ts: Date.now(), zipBase64: base64 };
         localStorage.setItem(SPIELER_CSV_CACHE_KEY, JSON.stringify(obj));
+        console.log('Saved spieler.csv cache (ZIP binary) with', arrayBuffer.byteLength, 'bytes');
       } catch (e) {
         console.warn('Failed to save spieler.csv cache', e);
       }
     }
 
-    // Download ZIP, extract spieler.csv (case-insensitive), return CSV text
+    // Download ZIP, extract spieler.csv (case-insensitive), cache the ZIP binary, return CSV text
     async function fetchAndExtractSpielerCsv(zipUrl) {
       const corsUrl = `https://corsproxy.io/?${encodeURIComponent(zipUrl)}`;
       const resp = await fetch(corsUrl);
       if (!resp.ok) throw new Error(`ZIP download failed: ${resp.status}`);
       const buf = await resp.arrayBuffer();
+
       // JSZip must be present (we included it above)
       const zip = await JSZip.loadAsync(buf);
       // try to find a file named spieler.csv (case-insensitive) anywhere in zip
@@ -536,18 +551,30 @@
       if (!fileEntry) throw new Error('spieler.csv not found inside ZIP');
       const file = zip.files[fileEntry];
       const text = await file.async('text');
+      
+      // Cache the original ZIP binary (not the extracted text)
+      saveCachedSpielerCsv(buf);
+      
       return text;
     }
 
     // Reworked: promptLoadSpielerCsvFile now downloads the DWZ ZIP, extracts spieler.csv
-    // and caches it. Falls back to file picker if download/extract fails.
+    // and caches the ZIP binary. Falls back to file picker if download/extract fails.
     async function promptLoadSpielerCsvFile() {
       // 1) check cache
       try {
         const cached = getCachedSpielerCsv();
         if (cached && (Date.now() - cached.ts) < SPIELER_CACHE_MAX_AGE_MS) {
-          // cached and fresh
-          return cached.csv || '';
+          // cached and fresh - extract CSV text from cached ZIP binary
+          try {
+            const zip = await JSZip.loadAsync(cached.zipBuffer);
+            const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
+            if (!fileEntry) throw new Error('spieler.csv not found inside cached ZIP');
+            const text = await zip.files[fileEntry].async('text');
+            return text || '';
+          } catch (extractErr) {
+            console.warn('Error extracting CSV from cached ZIP, will re-download', extractErr);
+          }
         }
       } catch (e) {
         console.warn('Error reading spieler.csv cache', e);
@@ -557,7 +584,6 @@
       try {
         const csvText = await fetchAndExtractSpielerCsv(SPIELER_ZIP_URL);
         if (csvText && csvText.length > 0) {
-          saveCachedSpielerCsv(csvText);
           return csvText;
         }
       } catch (e) {
@@ -587,17 +613,17 @@
                 const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
                 if (!fileEntry) throw new Error('spieler.csv not found inside selected ZIP');
                 const text = await zip.files[fileEntry].async('text');
-                saveCachedSpielerCsv(text);
+                saveCachedSpielerCsv(ab);
                 document.body.removeChild(input);
                 resolve(text);
                 return;
               } else {
-                // assume plain CSV
+                // assume plain CSV - we cannot cache it as ZIP since we only store ZIP binaries
                 const reader = new FileReader();
                 reader.onload = () => {
                   document.body.removeChild(input);
                   const t = reader.result || '';
-                  if (t && typeof t === 'string') saveCachedSpielerCsv(t);
+                  // Don't cache plain CSV, only ZIP files are cached
                   resolve(t || '');
                 };
                 reader.onerror = () => {
@@ -1112,7 +1138,8 @@
             missingFromCache.push(n);
           }
         }
-        
+        console.log(`${mapped.length} names resolved from cache. ${missingFromCache.length} names missing from cache.`);
+
         // Only load CSV if there are names missing from cache
         if (missingFromCache.length > 0) {
           try {
@@ -1127,6 +1154,7 @@
               
               // If exact match failed, try fuzzy matching with regex (handles corrupted umlauts)
               if (!id) {
+                console.log(`No exact match for name in CSV: ${n}`);
                 const fuzzyPattern = createUmlautFuzzyPattern(n);
                 if (fuzzyPattern) {
                   // Search through all map entries for a match
@@ -1144,6 +1172,7 @@
                 // Collect players to cache (store normalized name -> id)
                 playersToCache.push([key, id]);
               } else {
+                console.log(`Name not found in CSV: ${n}`);
                 notFound.push(n);
               }
             }
@@ -1162,22 +1191,25 @@
         // Optionally update the pkzInput field
         if (updateInput) {
           const pkzInput = document.getElementById('pkz');
-          if (pkzInput) {
-            if (mapped.length > 0 && notFound.length === 0) {
-              // all mapped -> populate with IDs
-              pkzInput.value = mapped.join(',');
-            } else if (mapped.length > 0 && notFound.length > 0) {
-              // mixed -> combine mapped IDs plus original names for those not found
-              pkzInput.value = mapped.concat(notFound).join(',');
-              console.warn(`Some ${contextName} names could not be resolved to IDs:`, notFound);
-            } else {
-              // none mapped -> keep original behaviour
-              pkzInput.value = names.join(',');
-              console.warn(`No ${contextName} names could be resolved to IDs. See console for details.`);
-            }
-            // refresh visible table
-            refreshPkzTable();
+          if (!pkzInput) {
+            console.warn(`Could not find table of players on the page to update.`);
+            return { mapped, notFound };
           }
+
+          if (mapped.length > 0 && notFound.length === 0) {
+            // all mapped -> populate with IDs
+            pkzInput.value = mapped.join(',');
+          } else if (mapped.length > 0 && notFound.length > 0) {
+            // mixed -> combine mapped IDs plus original names for those not found
+            pkzInput.value = mapped.concat(notFound).join(',');
+            console.warn(`Some ${contextName} names could not be resolved to IDs:`, notFound);
+          } else {
+            // none mapped -> keep original behaviour
+            pkzInput.value = names.join(',');
+            console.warn(`No ${contextName} names could be resolved to IDs. See console for details.`);
+          }
+          // refresh visible table
+          refreshPkzTable();
         }
         
         return { mapped, notFound };
