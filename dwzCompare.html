@@ -667,19 +667,23 @@
       catch (e) { /* ignore storage errors */ }
     }
     // restore previous input on page load
-    try {
-      const prev = loadPreviousInput();
-      if (prev) {
-        document.getElementById('pkz').value = prev;
-        refreshPkzTable(); // keep table in sync
-      }
-      // restore saved age-adjust checkbox state
-      const cb = document.getElementById('ageAdjustCheckbox');
-      if (cb) cb.checked = loadAgeAdjust();
-      // restore months value
-      const monthsEl = document.getElementById('months');
-      if (monthsEl) monthsEl.value = loadMonths();
-    } catch (e) { /* ignore */ }
+    (async () => {
+      try {
+        const prev = loadPreviousInput();
+        // If there are previous players, load CSV data first so refreshPkzTable can display full player info
+        if (prev) {
+          await loadSpielerCsv();
+          document.getElementById('pkz').value = prev;
+          refreshPkzTable(); // keep table in sync
+        }
+        // restore saved age-adjust checkbox state
+        const cb = document.getElementById('ageAdjustCheckbox');
+        if (cb) cb.checked = loadAgeAdjust();
+        // restore months value
+        const monthsEl = document.getElementById('months');
+        if (monthsEl) monthsEl.value = loadMonths();
+      } catch (e) { /* ignore */ }
+    })();
 
     // In-memory shared cache for the current run to avoid localStorage race overwrites
     // and to reuse loaded entries across parallel fetchTournamentDate calls.
