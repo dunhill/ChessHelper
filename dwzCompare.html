@@ -172,6 +172,14 @@
 <body>
   <h1>DWZ-Verlauf mehrerer Spieler</h1>
 
+  <!-- DWZ Database management -->
+  <div style="margin-bottom:16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+    <span style="font-weight:600;">DWZ Datenbank:</span>
+    <span style="font-size:14px;">Date: <span id="dbSnapshotDate" style="font-weight:600; color:#0077cc;">Wird geladen...</span></span>
+    <a id="downloadDbLink" href="https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip" target="_blank" style="text-decoration:underline; font-size:0.95rem; color:#0077cc;">(1) Download latest ZIP</a>
+    <a id="uploadDbBtn" type="button" style="background:none; border:none; text-decoration:underline; font-size:0.95rem; color:#0077cc; cursor:pointer; padding:0; font-family:inherit;">(2) Upload ZIP</a>
+  </div>
+
   <label for="pkz" style="margin-right:6px;">Spieler Info:</label>
   <div style="display:flex; align-items:center; gap:8px;">
     <a id="clearAllBtn" href="#" style="margin-right:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Clear all</button>
@@ -484,6 +492,43 @@
     const SPIELER_ZIP_URL = 'https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip';
     const SPIELER_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
+    // Extract snapshot date from readme.txt in the ZIP
+    async function extractSnapshotDateFromZip(zipBuffer) {
+      try {
+        const zip = await JSZip.loadAsync(zipBuffer);
+        const readmeEntry = Object.keys(zip.files).find(f => /readme\.txt$/i.test(f));
+        if (!readmeEntry) {
+          console.warn('readme.txt not found in ZIP');
+          return null;
+        }
+        const readmeText = await zip.files[readmeEntry].async('text');
+        // Extract date using regex pattern: "DWZ-Datenbank vom dd.mm.yyyy"
+        const match = readmeText.match(/DWZ-Datenbank vom (\d{2}\.\d{2}\.\d{4})/);
+        return match ? match[1] : null;
+      } catch (e) {
+        console.error('Error extracting snapshot date from ZIP:', e);
+        return null;
+      }
+    }
+
+    // Display snapshot date in the UI by extracting from cached ZIP
+    async function displaySnapshotDate() {
+      const dateEl = document.getElementById('dbSnapshotDate');
+      if (!dateEl) return;
+      try {
+        const cached = getCachedSpielerCsv();
+        if (!cached || !cached.zipBuffer) {
+          dateEl.textContent = 'Unbekannt';
+          return;
+        }
+        const date = await extractSnapshotDateFromZip(cached.zipBuffer);
+        dateEl.textContent = date ? `${date}` : 'Unbekannt';
+      } catch (e) {
+        console.error('Error displaying snapshot date:', e);
+        dateEl.textContent = 'Unbekannt';
+      }
+    }
+
     function getCachedSpielerCsv() {
       try {
         const raw = localStorage.getItem(SPIELER_CSV_CACHE_KEY);
@@ -515,45 +560,48 @@
         const obj = { ts: Date.now(), zipBase64: base64 };
         localStorage.setItem(SPIELER_CSV_CACHE_KEY, JSON.stringify(obj));
         console.log('Saved spieler.csv cache (ZIP binary) with', arrayBuffer.byteLength, 'bytes');
+        // Update the displayed snapshot date
+        displaySnapshotDate();
       } catch (e) {
         console.warn('Failed to save spieler.csv cache', e);
       }
     }
 
-    // Reworked: promptLoadSpielerCsvFile now downloads the DWZ ZIP, extracts spieler.csv
-    // and caches the ZIP binary. Falls back to file picker if download/extract fails.
+    // Load spieler.csv from cache first, or prompt user to upload if not cached
     async function promptLoadSpielerCsvFile() {
-      // 1) check cache
       try {
+        // Try to load from cache first
         const cached = getCachedSpielerCsv();
-        if (cached && (Date.now() - cached.ts) < SPIELER_CACHE_MAX_AGE_MS) {
-          // cached and fresh - extract CSV text from cached ZIP binary
+        if (cached && cached.zipBuffer) {
           try {
             const zip = await JSZip.loadAsync(cached.zipBuffer);
             const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
-            if (!fileEntry) throw new Error('spieler.csv not found inside cached ZIP');
-            const text = await zip.files[fileEntry].async('text');
-            console.log('Successfully extracted spieler.csv from cached ZIP');
-            return text || '';
-          } catch (extractErr) {
-            console.warn('Error extracting CSV from cached ZIP, will re-download', extractErr);
+            if (fileEntry) {
+              const text = await zip.files[fileEntry].async('text');
+              console.log('Loaded spieler.csv from cache');
+              return text;
+            }
+          } catch (e) {
+            console.warn('Error extracting CSV from cached ZIP, will prompt for upload:', e);
           }
         }
-        else if (cached) {
-          console.log('Cached spieler.csv ZIP is outdated, needs re-downloading');
-        } else {
-          console.log('No cached spieler.csv ZIP found, needs downloading');
-        }
+        
+        // If cache is empty or invalid, prompt user to upload
+        console.log('No valid cached ZIP found, prompting user to upload');
+        return await promptUploadSpielerCsvFile();
       } catch (e) {
-        console.warn('Error reading spieler.csv cache', e);
+        console.error('Error in promptLoadSpielerCsvFile:', e);
+        return null;
       }
+    }
 
-      // 3) fallback to original file-picker prompt (in case user wants to load local copy)
+    // Updated prompts for loading/selecting zip file with date extraction
+    async function promptUploadSpielerCsvFile() {
       return new Promise((resolve) => {
         try {
           const input = document.createElement('input');
           input.type = 'file';
-          input.accept = '.zip,.csv,application/zip,text/csv';
+          input.accept = '.zip,application/zip';
           input.style.display = 'none';
           document.body.appendChild(input);
           input.addEventListener('change', async () => {
@@ -563,7 +611,7 @@
               resolve(null);
               return;
             }
-            // If user provided a zip, try to extract; if csv, read directly
+            // Handle ZIP file
             try {
               if (/\.zip$/i.test(file.name) || file.type === 'application/zip') {
                 const ab = await file.arrayBuffer();
@@ -576,11 +624,12 @@
                 resolve(text);
                 return;
               } else {
-                throw new Error('Unsupported file type. Please select a ZIP or CSV file.');
+                throw new Error('Please select a ZIP file.');
               }
             } catch (err) {
               document.body.removeChild(input);
               console.error('Error processing selected file', err);
+              alert('Fehler beim Laden der Datei: ' + err.message);
               resolve(null);
             }
           }, { once: true });
@@ -669,6 +718,9 @@
     // restore previous input on page load
     (async () => {
       try {
+        // Display snapshot date from cache on page load
+        displaySnapshotDate();
+        
         const prev = loadPreviousInput();
         // If there are previous players, load CSV data first so refreshPkzTable can display full player info
         if (prev) {
@@ -1351,6 +1403,32 @@
         // move focus back to first control
         const firstControl = document.getElementById('addByNameLink');
         if (firstControl) firstControl.focus();
+      });
+    })();
+
+    // === Upload Database ZIP button handler ===
+    (function () {
+      const uploadBtn = document.getElementById('uploadDbBtn');
+      if (!uploadBtn) return;
+      
+      uploadBtn.addEventListener('click', async () => {
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Loading...';
+        try {
+          const csv = await promptUploadSpielerCsvFile();
+          if (csv) {
+            // Reset in-memory maps so they'll be reloaded
+            spielerNameToIdMap = null;
+            spielerIdToDataMap = null;
+            spielerCsvLoadPromise = null;
+            console.log('Database uploaded and cached successfully');
+          }
+        } catch (e) {
+          console.error('Error uploading database:', e);
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload ZIP';
+        }
       });
     })();
 
