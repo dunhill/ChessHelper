@@ -178,7 +178,6 @@
     <a id="addByNameLink" href="#" style="margin-left:6px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add by name</a>
     <a id="addTopPlayersLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add top players</a>
     <a id="addFromChessResultsLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from chess-results</a>
-    <a id="addFromHistoryLink" href="#" style="margin-left:12px; text-decoration:underline; font-size:0.95rem; color:#0077cc;">Add from history</a>
   </div>
 
   <!-- Replaced editable input with a read-only table showing players (IDs only populated for step 1).
@@ -188,13 +187,17 @@
       <thead>
         <tr>
           <th style="text-align:left; padding:6px;">ID</th>
+          <th style="text-align:left; padding:6px;">Verein</th>
           <th style="text-align:left; padding:6px;">Name</th>
           <th style="text-align:left; padding:6px;">YoB</th>
-          <th style="text-align:left; padding:6px;">DWZ</th>
+          <th style="text-align:left; padding:6px;">Gender</th>
+          <th style="text-align:left; padding:6px;">Cached DWZ</th>
+          <th style="text-align:left; padding:6px;">Cached Elo</th>
+          <th style="text-align:left; padding:6px;">FIDE Country</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td colspan="4" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>
+        <tr><td colspan="8" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>
       </tbody>
     </table>
     <input type="hidden" id="pkz" value="">
@@ -281,19 +284,6 @@
     </div>
   </div>
 
-  <!-- History modal -->
-  <div id="historyModalOverlay" role="dialog" aria-modal="true" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:10002;">
-    <div id="historyModal" role="document" style="background:#fff; padding:16px; border-radius:6px; width:600px; max-width:calc(100% - 32px); max-height:calc(100% - 32px); box-shadow:0 6px 24px rgba(0,0,0,0.2); display:flex; flex-direction:column;">
-      <h3 style="margin:0 0 12px 0; font-size:1.05rem;">Add from history</h3>
-      <label for="historyPlayerList" style="margin-bottom:4px; font-size:13px;">Select players (hold Ctrl/Cmd to select multiple):</label>
-      <select id="historyPlayerList" multiple size="15" style="width:100%; padding:6px; margin-top:4px; box-sizing:border-box; border:1px solid #ddd; font-size:13px; overflow-y:auto;"></select>
-      <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
-        <button id="historyCancel" type="button">Abbrechen</button>
-        <button id="historyAdd" type="button">Add</button>
-      </div>
-    </div>
-  </div>
-
 
 
   <!-- Add by Name modal -->
@@ -334,6 +324,7 @@
     // normalized lowercase name (remove spaces after commas etc.) to match
     // names scraped from the website.
     let spielerNameToIdMap = null;
+    let spielerIdToDataMap = null;  // Reverse lookup: ID -> player data
     let spielerCsvLoadPromise = null;
 
     function normalizeSpielerName(s) {
@@ -411,25 +402,46 @@
             if (!fields || fields.length < 10) continue;
             
             const id = (fields[0] || '').trim();
+            const vereinId = (fields[1] || '').trim() || null;
             let name = (fields[4] || '').trim();
             if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1);
             
             const birthYear = (fields[7] || '').trim() || null;
             const dwzValue = parseInt((fields[9] || '').trim(), 10);
             const dwzValueOrNull = isNaN(dwzValue) ? null : dwzValue;
+            const gender = (fields[5] || '').trim() || null;
+            const fideElo = parseInt((fields[11] || '').trim(), 10);
+            const fideEloOrNull = isNaN(fideElo) ? null : fideElo;
+            const fideTitle = (fields[12] || '').trim() || null;
+            const fideCountry = (fields[14] || '').trim() || null;
             
             const key = normalizeSpielerName(name);
             if (key && id) {
               if (!map.has(key)) {
                 map.set(key, {
                   id: id,
+                  vereinId: vereinId,
+                  name: name,
                   birthYear: birthYear,
-                  dwzValue: dwzValueOrNull
+                  dwzValue: dwzValueOrNull,
+                  gender: gender,
+                  fideElo: fideEloOrNull,
+                  fideTitle: fideTitle,
+                  fideCountry: fideCountry
                 });
               }
             }
           }
           spielerNameToIdMap = map;
+          
+          // Build reverse ID -> data map for efficient lookup by ID
+          spielerIdToDataMap = new Map();
+          for (const [_key, data] of map) {
+            if (!spielerIdToDataMap.has(data.id)) {
+              spielerIdToDataMap.set(data.id, data);
+            }
+          }
+          
           return map;
         } catch (err) {
           console.error('Error loading spieler.csv', err);
@@ -527,6 +539,11 @@
             console.warn('Error extracting CSV from cached ZIP, will re-download', extractErr);
           }
         }
+        else if (cached) {
+          console.log('Cached spieler.csv ZIP is outdated, needs re-downloading');
+        } else {
+          console.log('No cached spieler.csv ZIP found, needs downloading');
+        }
       } catch (e) {
         console.warn('Error reading spieler.csv cache', e);
       }
@@ -585,7 +602,6 @@
     const AGE_ADJUST_KEY = 'ch_age_adjust_v1';
     const PKZ_YEAR_CACHE_KEY = 'ch_pkz_years_v1';
     const MONTHS_KEY = 'ch_months_v1';
-    const PLAYER_CACHE_KEY = 'ch_players_v1';
     const TOP_PLAYERS_SETTINGS_KEY = 'ch_top_players_settings_v1';
     // load/save helpers for pkz -> birth year cache
     function loadPkzYearCache() {
@@ -649,39 +665,6 @@
     function saveTournamentCache(cache) {
       try { localStorage.setItem(TOURNAMENT_CACHE_KEY, JSON.stringify(cache)); }
       catch (e) { /* ignore storage errors */ }
-    }
-
-    // load/save helpers for player name -> DWZ ID cache
-    function loadPlayerCache() {
-      try { return JSON.parse(localStorage.getItem(PLAYER_CACHE_KEY) || '{}'); }
-      catch (e) { return {}; }
-    }
-    function savePlayerCache(cache) {
-      try { localStorage.setItem(PLAYER_CACHE_KEY, JSON.stringify(cache)); }
-      catch (e) { /* ignore storage errors */ }
-    }
-    // Helper function to add players to cache if not already present
-    // Can accept a single player (name, id) or an array of [name, id] pairs
-    function addPlayersToCache(players) {
-      if (!players || players.length === 0) return;
-      const cache = loadPlayerCache();
-      let updated = false;
-      
-      // Handle both single player and array of players
-      const playerArray = Array.isArray(players[0]) ? players : [players];
-      
-      for (const [normalizedName, dwzId] of playerArray) {
-        if (!normalizedName || !dwzId) continue;
-        // Only add if not already in cache
-        if (!Object.prototype.hasOwnProperty.call(cache, normalizedName)) {
-          cache[normalizedName] = dwzId;
-          updated = true;
-        }
-      }
-      
-      if (updated) {
-        savePlayerCache(cache);
-      }
     }
     // restore previous input on page load
     try {
@@ -1036,70 +1019,46 @@
       } = options;
       
       try {
-        // First, try to resolve names from browser cache
-        const cache = loadPlayerCache();
         const mapped = [];
         const notFound = [];
-        const missingFromCache = []; // Names not found in cache
         
-        // Check cache first
-        for (const n of names) {
-          const key = normalizeSpielerName(n);
-          const cachedId = cache[key];
-          if (cachedId) {
-            mapped.push(cachedId);
-          } else {
-            missingFromCache.push(n);
-          }
-        }
-        console.log(`${mapped.length} names resolved from cache. ${missingFromCache.length} names missing from cache.`);
-
-        // Only load CSV if there are names missing from cache
-        if (missingFromCache.length > 0) {
-          try {
-            const csvMap = await loadSpielerCsv();
-            const playersToCache = [];
+        // Load CSV data to resolve names
+        try {
+          const csvMap = await loadSpielerCsv();
+          
+          // Look up names in CSV
+          for (const n of names) {
+            const key = normalizeSpielerName(n);
+            let playerInfo = csvMap.get(key);
+            let id = playerInfo ? (playerInfo.id || '') : '';
             
-            // Look up missing names in CSV
-            for (const n of missingFromCache) {
-              const key = normalizeSpielerName(n);
-              let playerInfo = csvMap.get(key);
-              let id = playerInfo ? (playerInfo.id || '') : '';
-              
-              // If exact match failed, try fuzzy matching with regex (handles corrupted umlauts)
-              if (!id) {
-                console.log(`No exact match for name in CSV: ${n}`);
-                const fuzzyPattern = createUmlautFuzzyPattern(n);
-                if (fuzzyPattern) {
-                  // Search through all map entries for a match
-                  for (const [mapKey, mapInfo] of csvMap.entries()) {
-                    if (fuzzyPattern.test(mapKey)) {
-                      id = mapInfo && mapInfo.id ? mapInfo.id : '';
-                      break;
-                    }
+            // If exact match failed, try fuzzy matching with regex (handles corrupted umlauts)
+            if (!id) {
+              console.log(`No exact match for name in CSV: ${n}`);
+              const fuzzyPattern = createUmlautFuzzyPattern(n);
+              if (fuzzyPattern) {
+                // Search through all map entries for a match
+                for (const [mapKey, mapInfo] of csvMap.entries()) {
+                  if (fuzzyPattern.test(mapKey)) {
+                    id = mapInfo && mapInfo.id ? mapInfo.id : '';
+                    playerInfo = mapInfo;
+                    break;
                   }
                 }
               }
-              
-              if (id) {
-                mapped.push(id);
-                // Collect players to cache (store normalized name -> id)
-                playersToCache.push([key, id]);
-              } else {
-                console.log(`Name not found in CSV: ${n}`);
-                notFound.push(n);
-              }
             }
             
-            // Store newly found players in cache
-            if (playersToCache.length > 0) {
-              addPlayersToCache(playersToCache);
+            if (id && playerInfo) {
+              mapped.push(id);
+            } else {
+              console.log(`Name not found in CSV: ${n}`);
+              notFound.push(n);
             }
-          } catch (csvErr) {
-            // If CSV loading fails, mark all missing names as not found
-            console.error('Error loading CSV file:', csvErr);
-            notFound.push(...missingFromCache);
           }
+        } catch (csvErr) {
+          // If CSV loading fails, mark all names as not found
+          console.error('Error loading CSV file:', csvErr);
+          notFound.push(...names);
         }
         
         // Optionally update the pkzInput field
@@ -1309,7 +1268,7 @@
       const tbody = tbl.querySelector('tbody');
       tbody.innerHTML = '';
       if (ids.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>';
         return;
       }
       ids.forEach(id => {
@@ -1318,10 +1277,45 @@
         tdId.textContent = id;
         tdId.style.padding = '6px';
         tr.appendChild(tdId);
-        // For step 1 keep other columns empty (to be filled later)
-        const tdName = document.createElement('td'); tdName.textContent = ''; tdName.style.padding = '6px'; tr.appendChild(tdName);
-        const tdYoB  = document.createElement('td'); tdYoB.textContent = ''; tdYoB.style.padding = '6px'; tr.appendChild(tdYoB);
-        const tdDWZ  = document.createElement('td'); tdDWZ.textContent = ''; tdDWZ.style.padding = '6px'; tr.appendChild(tdDWZ);
+        
+        // Populate player information from spielerIdToDataMap
+        const playerData = spielerIdToDataMap ? spielerIdToDataMap.get(id) : null;
+        
+        const tdVereIn = document.createElement('td');
+        tdVereIn.textContent = playerData && playerData.vereinId ? playerData.vereinId : '';
+        tdVereIn.style.padding = '6px';
+        tr.appendChild(tdVereIn);
+        
+        const tdName = document.createElement('td');
+        tdName.textContent = playerData && playerData.name ? playerData.name : '';
+        tdName.style.padding = '6px';
+        tr.appendChild(tdName);
+        
+        const tdYoB = document.createElement('td');
+        tdYoB.textContent = playerData && playerData.birthYear ? playerData.birthYear : '';
+        tdYoB.style.padding = '6px';
+        tr.appendChild(tdYoB);
+        
+        const tdGender = document.createElement('td');
+        tdGender.textContent = playerData && playerData.gender ? playerData.gender : '';
+        tdGender.style.padding = '6px';
+        tr.appendChild(tdGender);
+        
+        const tdDWZ = document.createElement('td');
+        tdDWZ.textContent = playerData && playerData.dwzValue ? playerData.dwzValue : '';
+        tdDWZ.style.padding = '6px';
+        tr.appendChild(tdDWZ);
+        
+        const tdFideElo = document.createElement('td');
+        tdFideElo.textContent = playerData && playerData.fideElo ? playerData.fideElo : '';
+        tdFideElo.style.padding = '6px';
+        tr.appendChild(tdFideElo);
+        
+        const tdFideCountry = document.createElement('td');
+        tdFideCountry.textContent = playerData && playerData.fideCountry ? playerData.fideCountry : '';
+        tdFideCountry.style.padding = '6px';
+        tr.appendChild(tdFideCountry);
+        
         tbody.appendChild(tr);
       });
     }
@@ -1630,107 +1624,6 @@
           overlay.style.display = 'none';
           if (crLink) crLink.focus();
         }
-      });
-    })();
-
-    // === Add from history modal handling ===
-    (function () {
-      const historyLink = document.getElementById('addFromHistoryLink');
-      const overlay = document.getElementById('historyModalOverlay');
-      const cancelBtn = document.getElementById('historyCancel');
-      const addBtn = document.getElementById('historyAdd');
-      const playerList = document.getElementById('historyPlayerList');
-
-      if (!overlay || !historyLink || !playerList) return;
-
-      // Function to populate the player list from cache
-      function populatePlayerList() {
-        const cache = loadPlayerCache();
-        const players = [];
-        
-        // Convert cache object to array of {name, id} objects
-        for (const [normalizedName, id] of Object.entries(cache)) {
-          if (normalizedName && id) {
-            players.push({ name: normalizedName, id: id });
-          }
-        }
-        
-        // Sort by name (case-insensitive)
-        players.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-        
-        // Clear existing options
-        playerList.innerHTML = '';
-        
-        // Populate select element
-        if (players.length === 0) {
-          const option = document.createElement('option');
-          option.textContent = '(No players in history)';
-          option.disabled = true;
-          playerList.appendChild(option);
-        } else {
-          players.forEach(player => {
-            const option = document.createElement('option');
-            option.value = player.id;
-            option.textContent = `${player.name} (ID: ${player.id})`;
-            playerList.appendChild(option);
-          });
-        }
-      }
-
-      historyLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        populatePlayerList();
-        overlay.style.display = 'flex';
-        if (playerList) playerList.focus();
-      });
-
-      cancelBtn.addEventListener('click', () => {
-        overlay.style.display = 'none';
-        if (historyLink) historyLink.focus();
-      });
-
-      // Close when clicking outside the modal content (on overlay)
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-          overlay.style.display = 'none';
-          if (historyLink) historyLink.focus();
-        }
-      });
-
-      // Close on Escape key
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && overlay.style.display === 'flex') {
-          overlay.style.display = 'none';
-          if (historyLink) historyLink.focus();
-        }
-      });
-
-      addBtn.addEventListener('click', () => {
-        const selectedOptions = Array.from(playerList.selectedOptions);
-        
-        if (selectedOptions.length === 0) {
-          alert('Bitte mindestens einen Spieler auswählen.');
-          return;
-        }
-        
-        // Get IDs from selected options
-        const selectedIds = selectedOptions.map(option => option.value);
-        
-        // Add IDs to the pkz input field
-        const pkzInput = document.getElementById('pkz');
-        if (pkzInput) {
-          const currentValue = (pkzInput.value || '').trim();
-          const currentIds = currentValue ? currentValue.split(',').map(id => id.trim()).filter(Boolean) : [];
-          
-          // Combine current IDs with new IDs, avoiding duplicates
-          const allIds = [...new Set([...currentIds, ...selectedIds])];
-          pkzInput.value = allIds.join(',');
-          refreshPkzTable();
-        }
-        
-        // Close modal
-        overlay.style.display = 'none';
-        if (historyLink) historyLink.focus();
       });
     })();
 
