@@ -328,13 +328,32 @@
 
     // Simple helper to work around same-origin restrictions when fetching
     // remote pages from within the browser.
-    // Change this proxy if it becomes unavailable.
+    // Change these proxies if they become unavailable.
+    const corsProxyProviders = [
+      (targetUrl) => `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+      (targetUrl) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+      (targetUrl) => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(targetUrl)}`
+    ];
+
     function buildCorsProxyUrl(targetUrl) {
-      return `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+      return corsProxyProviders[0](targetUrl);
     }
 
     async function corsFetch(targetUrl, options) {
-      return fetch(buildCorsProxyUrl(targetUrl), options);
+      let lastError = null;
+      for (const buildProxy of corsProxyProviders) {
+        const proxyUrl = buildProxy(targetUrl);
+        try {
+          const response = await fetch(proxyUrl, options);
+          if (response.ok) return response;
+          lastError = new Error(`HTTP ${response.status} from ${proxyUrl}`);
+          console.warn('CORS proxy returned non-ok response', proxyUrl, response.status);
+        } catch (err) {
+          lastError = err;
+          console.warn('CORS proxy fetch failure', proxyUrl, err);
+        }
+      }
+      throw lastError || new Error('All CORS proxies failed');
     }
 
     // --- Spieler CSV loader (load once, keep mapping name->ID in memory) ---
@@ -1257,7 +1276,7 @@
           plugins: { legend: { display: true, position: 'bottom' } },
           scales: {
             x: { type: 'time', time: { unit: 'day', tooltipFormat: 'dd.MM.yyyy' }, title: { display: true, text: 'Turnierdatum' } },
-            y: { title: { display: true, text: 'DWZneu' }, beginAtZero: false }
+            y: { title: { display: true, text: 'DWZ' }, beginAtZero: false }
           }
         }
       });
@@ -1543,9 +1562,7 @@
           const url = params.length ? `${base}?${params.join('&')}` : base;
 
           try {
-            // fetch content via a public CORS proxy (corsproxy.io may return 403 now)
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-            const resp = await fetch(proxyUrl);
+            const resp = await corsFetch(url);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const html = await resp.text();
             const parser = new DOMParser();
