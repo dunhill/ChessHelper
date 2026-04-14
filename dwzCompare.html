@@ -330,14 +330,10 @@
     // remote pages from within the browser.
     // Change these proxies if they become unavailable.
     const corsProxyProviders = [
-      (targetUrl) => `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
       (targetUrl) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+      (targetUrl) => `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
       (targetUrl) => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(targetUrl)}`
     ];
-
-    function buildCorsProxyUrl(targetUrl) {
-      return corsProxyProviders[0](targetUrl);
-    }
 
     async function corsFetch(targetUrl, options) {
       let lastError = null;
@@ -887,7 +883,6 @@
       if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
 
       const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-      const corsUrl = buildCorsProxyUrl(targetUrl);
       const playerSection = document.createElement('div');
       playerSection.className = 'player-section';
       const loadingH2 = document.createElement('h2');
@@ -899,7 +894,7 @@
       document.getElementById('playersContainer').appendChild(playerSection);
 
       try {
-        const response = await fetch(corsUrl);
+        const response = await corsFetch(targetUrl);
         if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
         const csv = await response.text();
         const rows = csv.trim().split('\n').map(r => r.split('|'));
@@ -1757,8 +1752,7 @@
       async function fetchPlayerDWZData(pkz) {
         try {
           const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-          const corsUrl = buildCorsProxyUrl(targetUrl);
-          const response = await fetch(corsUrl);
+          const response = await corsFetch(targetUrl);
           if (!response.ok) return null;
           const csv = await response.text();
           const rows = csv.trim().split('\n').map(r => r.split('|'));
