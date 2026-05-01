@@ -17,6 +17,14 @@
     return search && search.includes('art=9');
   }
 
+  function getLanZeroUrl() {
+    const currentUrl = new URL(window.location.href);
+    const currentLan = currentUrl.searchParams.get('lan');
+    if (currentLan === '0') return null;
+    currentUrl.searchParams.set('lan', '0');
+    return currentUrl.toString();
+  }
+
   function findTableByClassAndIndex(className, index) {
     const tables = Array.from(document.querySelectorAll(`table.${className}`));
     return tables[index] || null;
@@ -332,6 +340,15 @@
   function addControl() {
     const wrapper = document.createElement('div');
     wrapper.style.margin = '16px 0';
+
+    const lanZeroUrl = getLanZeroUrl();
+    if (lanZeroUrl) {
+      const languageHint = document.createElement('p');
+      languageHint.style.margin = '0 0 10px 0';
+      languageHint.style.fontSize = '0.95rem';
+      languageHint.innerHTML = `Die aktuelle Sprache ist nicht <code>lan=0</code>. Für zuverlässige Label-Suche bitte auf <a href="${lanZeroUrl}">dieselbe Seite mit lan=0 wechseln</a>.`;
+      wrapper.appendChild(languageHint);
+    }
 
     const button = document.createElement('button');
     button.type = 'button';
