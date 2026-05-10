@@ -62,6 +62,7 @@
   }
 
   function formatPoints(value) {
+    if (value === '?') return '?';
     if (value == null) return '';
     const isHalf = Math.abs(value % 1 - 0.5) < 1e-9;
     if (isHalf) {
@@ -72,6 +73,7 @@
   }
 
   function validatePoints(value, context) {
+    if (value === '?') return true;
     if (value == null) {
       console.error(`${LOG_PREFIX} Missing points value`, context);
       return false;
@@ -83,6 +85,32 @@
       return false;
     }
     return true;
+  }
+
+  function isEmptyResultCell(cell) {
+    if (!cell) return false;
+    const text = normalizeName(cell.textContent || '').replace(/\u00a0/g, '').trim();
+    return text === '';
+  }
+
+  function isClassicRoundPending(resultsTable, opponentHeaderLink) {
+    const headerCell = opponentHeaderLink?.closest('th');
+    const headerRow = resultsTable.querySelector('thead tr');
+    if (!headerCell || !headerRow) return false;
+
+    const columnIndex = Array.from(headerRow.children).indexOf(headerCell);
+    if (columnIndex < 0) return false;
+
+    const bodyRows = Array.from(resultsTable.querySelectorAll('tbody tr'));
+    for (const row of bodyRows) {
+      const cell = row.children[columnIndex];
+      if (!cell) continue;
+      if (!cell.matches('td.ergebnis, td.results')) continue;
+      if (isEmptyResultCell(cell)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function parseTeams(table, isDemPage) {
@@ -159,6 +187,17 @@
       }
 
       const rawPoints = pointsCells[i]?.textContent || '';
+      const isPendingRound = isClassicRoundPending(resultsTable, opponentHeaders[i]);
+      if (!normalizeName(rawPoints) && isPendingRound) {
+        matrix[teamNameToIndex.get(canonicalizeName(team.name))][opponentIndex] = '?';
+        console.info(`${LOG_PREFIX} Round has planned/unplayed games; using '?'`, {
+          team: team.name,
+          opponent: opponentName,
+          index: i
+        });
+        continue;
+      }
+
       const pointsValue = parsePoints(rawPoints);
       const isValid = validatePoints(pointsValue, {
         team: team.name,
