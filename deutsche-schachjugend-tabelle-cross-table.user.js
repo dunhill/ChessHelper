@@ -16,11 +16,20 @@
 
   function isTargetPage() {
     if (!window.location.href.startsWith('https://www.deutsche-schachjugend.de')) return false;
-    return /tabelle\/?$/.test(window.location.pathname);
+    return /\/tabelle(?:\/[^/?#]+)?\/?$/.test(window.location.pathname);
   }
 
   function normalizeName(name) {
     return (name || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function canonicalizeName(name) {
+    return normalizeName(name)
+      .normalize('NFKC')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/[‐‑‒–—―]/g, '-')
+      .toLowerCase()
+      .trim();
   }
 
   function parsePoints(rawText) {
@@ -35,6 +44,21 @@
     if (!normalized) return null;
     const value = Number(normalized);
     return Number.isFinite(value) ? value : null;
+  }
+
+  function extractNameFromCell(cell) {
+    if (!cell) return '';
+    const anchorName = normalizeName(cell.querySelector('a')?.textContent || '');
+    const strongAnchorName = normalizeName(cell.querySelector('strong a')?.textContent || '');
+    const strongName = normalizeName(cell.querySelector('strong')?.textContent || '');
+    const rawName = normalizeName(cell.textContent || '');
+    return normalizeName(strongAnchorName || anchorName || strongName || rawName);
+  }
+
+  function parsePosition(rawText) {
+    const text = (rawText || '').trim();
+    const match = text.match(/\d+/);
+    return match ? match[0] : text;
   }
 
   function formatPoints(value) {
@@ -61,14 +85,16 @@
     return true;
   }
 
-  function parseTeams(table) {
+  function parseTeams(table, isDemPage) {
     const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
     const teams = [];
 
     for (const [rowIndex, row] of bodyRows.entries()) {
       const positionCell = row.querySelector('td.tz.tableposition');
-      const nameCellLink = row.querySelector('td:nth-child(2) a');
-      const position = (positionCell?.textContent || '').trim();
+      const nameCellLink = isDemPage
+        ? row.querySelector('td.person a')
+        : row.querySelector('td:nth-child(2) a');
+      const position = parsePosition(positionCell?.textContent || '');
       const name = normalizeName(nameCellLink?.textContent || '');
       const href = nameCellLink ? new URL(nameCellLink.getAttribute('href'), window.location.href).toString() : null;
 
@@ -89,8 +115,152 @@
     return match ? normalizeName(match[1]) : null;
   }
 
-  async function fetchTeamResults(team, teamNameToIndex, matrix) {
+  function parseDemSidePoints(rawSidePoints) {
+    const value = parsePoints(rawSidePoints);
+    if (value == null) return null;
+    if (value !== 0 && value !== 0.5 && value !== 1) return null;
+    return value;
+  }
+
+  async function fetchClassicTeamResults(team, teamNameToIndex, matrix, resultsTable) {
+    const opponentHeaders = Array.from(
+      resultsTable.querySelectorAll('thead th.number a[title]')
+    );
+    const tfootRows = Array.from(resultsTable.querySelectorAll('tfoot tr'));
+    const brettpunkteRow = tfootRows.find((row) => {
+      const labelCell = row.querySelector('th:nth-child(2), td:nth-child(2)');
+      const label = normalizeName(labelCell?.textContent || '').toLowerCase();
+      return label === 'brettpunkte';
+    }) || tfootRows[0];
+
+    const pointsCells = brettpunkteRow
+      ? Array.from(brettpunkteRow.querySelectorAll('th.number, td.number'))
+      : [];
+
+    for (let i = 0; i < opponentHeaders.length; i += 1) {
+      const opponentName = extractOpponentFromHeaderTitle(opponentHeaders[i].getAttribute('title') || '');
+      if (!opponentName) {
+        console.error(`${LOG_PREFIX} Could not parse opponent name from header`, {
+          team: team.name,
+          title: opponentHeaders[i].getAttribute('title') || '',
+          index: i
+        });
+        continue;
+      }
+
+      const opponentIndex = teamNameToIndex.get(canonicalizeName(opponentName));
+      if (opponentIndex == null) {
+        console.error(`${LOG_PREFIX} Opponent not found in team list`, {
+          team: team.name,
+          opponent: opponentName,
+          url: team.href
+        });
+        continue;
+      }
+
+      const rawPoints = pointsCells[i]?.textContent || '';
+      const pointsValue = parsePoints(rawPoints);
+      const isValid = validatePoints(pointsValue, {
+        team: team.name,
+        opponent: opponentName,
+        rawPoints,
+        url: team.href
+      });
+      if (!isValid) continue;
+
+      matrix[teamNameToIndex.get(canonicalizeName(team.name))][opponentIndex] = pointsValue;
+    }
+  }
+
+  async function fetchDemTeamResults(team, teamNameToIndex, matrix, resultsTable) {
+    const rows = Array.from(resultsTable.querySelectorAll('tbody tr'));
+    if (rows.length === 0) {
+      console.error(`${LOG_PREFIX} DEM table has no body rows`, { team: team.name, url: team.href });
+      return;
+    }
+
+    for (const [index, row] of rows.entries()) {
+      const thCell = row.querySelector('td.th');
+      const taCell = row.querySelector('td.ta');
+      const tmCell = row.querySelector('td.tm');
+      const resultText = normalizeName(tmCell?.textContent || '');
+      const resultMatch = resultText.match(/(.+?)\s*:\s*(.+)/);
+
+      if (!thCell || !taCell || !resultMatch) {
+        console.error(`${LOG_PREFIX} DEM row has invalid structure`, {
+          team: team.name,
+          index,
+          resultText
+        });
+        continue;
+      }
+
+      const homeName = extractNameFromCell(thCell);
+      const awayName = extractNameFromCell(taCell);
+      if (!homeName || !awayName) {
+        console.error(`${LOG_PREFIX} DEM row team names could not be parsed`, {
+          team: team.name,
+          index,
+          homeName,
+          awayName
+        });
+        continue;
+      }
+
+      const homePoints = parseDemSidePoints(resultMatch[1]);
+      const awayPoints = parseDemSidePoints(resultMatch[2]);
+
+      if (homePoints == null || awayPoints == null) {
+        console.error(`${LOG_PREFIX} DEM result points are invalid`, {
+          team: team.name,
+          resultText,
+          index
+        });
+        continue;
+      }
+
+      const currentTeamCanonical = canonicalizeName(team.name);
+      const homeCanonical = canonicalizeName(homeName);
+      const awayCanonical = canonicalizeName(awayName);
+      const teamIsHome = homeCanonical === currentTeamCanonical;
+      const teamIsAway = awayCanonical === currentTeamCanonical;
+      if (!teamIsHome && !teamIsAway) {
+        console.error(`${LOG_PREFIX} Current team not found in DEM row`, {
+          team: team.name,
+          homeName,
+          awayName,
+          index
+        });
+        continue;
+      }
+
+      const opponentName = teamIsHome ? awayName : homeName;
+      const opponentIndex = teamNameToIndex.get(canonicalizeName(opponentName));
+      if (opponentIndex == null) {
+        console.error(`${LOG_PREFIX} Opponent not found in team list`, {
+          team: team.name,
+          opponent: opponentName,
+          url: team.href
+        });
+        continue;
+      }
+
+      const pointsValue = teamIsHome ? homePoints : awayPoints;
+      const isValid = validatePoints(pointsValue, {
+        team: team.name,
+        opponent: opponentName,
+        rawPoints: resultText,
+        url: team.href
+      });
+      if (!isValid) continue;
+
+      matrix[teamNameToIndex.get(currentTeamCanonical)][opponentIndex] = pointsValue;
+    }
+  }
+
+  async function fetchTeamResults(team, teamNameToIndex, matrix, isDemPage) {
     try {
+      console.info(`${LOG_PREFIX} Fetching team page`, { team: team.name, url: team.href, mode: isDemPage ? 'dem' : 'classic' });
       const response = await fetch(team.href, { credentials: 'same-origin' });
       if (!response.ok) {
         console.error(`${LOG_PREFIX} Failed to fetch team page`, { team: team.name, url: team.href, status: response.status });
@@ -99,58 +269,22 @@
 
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const resultsTable = doc.querySelector('div.results table');
+      const resultsTable = isDemPage
+        ? doc.querySelector('div.results table.spieler')
+        : doc.querySelector('div.results table');
       if (!resultsTable) {
-        console.error(`${LOG_PREFIX} Team page has no results table`, { team: team.name, url: team.href });
+        console.error(`${LOG_PREFIX} Team page has no expected results table`, {
+          team: team.name,
+          url: team.href,
+          expected: isDemPage ? 'div.results table.spieler' : 'div.results table'
+        });
         return;
       }
 
-      const opponentHeaders = Array.from(
-        resultsTable.querySelectorAll('thead th.number a[title]')
-      );
-      const tfootRows = Array.from(resultsTable.querySelectorAll('tfoot tr'));
-      const brettpunkteRow = tfootRows.find((row) => {
-        const labelCell = row.querySelector('th:nth-child(2), td:nth-child(2)');
-        const label = normalizeName(labelCell?.textContent || '').toLowerCase();
-        return label === 'brettpunkte';
-      }) || tfootRows[0];
-
-      const pointsCells = brettpunkteRow
-        ? Array.from(brettpunkteRow.querySelectorAll('th.number, td.number'))
-        : [];
-
-      for (let i = 0; i < opponentHeaders.length; i += 1) {
-        const opponentName = extractOpponentFromHeaderTitle(opponentHeaders[i].getAttribute('title') || '');
-        if (!opponentName) {
-          console.error(`${LOG_PREFIX} Could not parse opponent name from header`, {
-            team: team.name,
-            title: opponentHeaders[i].getAttribute('title') || '',
-            index: i
-          });
-          continue;
-        }
-
-        const opponentIndex = teamNameToIndex.get(opponentName);
-        if (opponentIndex == null) {
-          console.error(`${LOG_PREFIX} Opponent not found in team list`, {
-            team: team.name,
-            opponent: opponentName,
-            url: team.href
-          });
-          continue;
-        }
-
-        const rawPoints = pointsCells[i]?.textContent || '';
-        const pointsValue = parsePoints(rawPoints);
-        const isValid = validatePoints(pointsValue, {
-          team: team.name,
-          opponent: opponentName,
-          rawPoints,
-          url: team.href
-        });
-        if (!isValid) continue;
-
-        matrix[teamNameToIndex.get(team.name)][opponentIndex] = pointsValue;
+      if (isDemPage) {
+        await fetchDemTeamResults(team, teamNameToIndex, matrix, resultsTable);
+      } else {
+        await fetchClassicTeamResults(team, teamNameToIndex, matrix, resultsTable);
       }
     } catch (error) {
       console.error(`${LOG_PREFIX} Unexpected error while fetching team results`, {
@@ -199,6 +333,7 @@
       const th = document.createElement('th');
       th.className = CROSS_CLASS;
       th.textContent = team.position;
+      th.title = team.name;
       th.style.width = crossColumnWidth;
       th.style.minWidth = crossColumnWidth;
       th.style.maxWidth = crossColumnWidth;
@@ -288,15 +423,37 @@
 
     let isBuilt = false;
     let isVisible = false;
+    const isDemPage = /\/dem(?:-|\/|$)/i.test(window.location.pathname) || document.body.classList.contains('dem');
 
     createToggle(mainHeading, async (toggleLink) => {
       try {
         if (!isBuilt) {
-          const teams = parseTeams(table);
-          const teamNameToIndex = new Map(teams.map((team, idx) => [team.name, idx]));
+          const teams = parseTeams(table, isDemPage);
+          if (teams.length === 0) {
+            console.error(`${LOG_PREFIX} No teams parsed from main table.`);
+            return;
+          }
+
+          const teamNameToIndex = new Map();
+          teams.forEach((team, idx) => {
+            const key = canonicalizeName(team.name);
+            if (teamNameToIndex.has(key)) {
+              console.error(`${LOG_PREFIX} Duplicate canonical team name key`, {
+                name: team.name,
+                key
+              });
+            }
+            teamNameToIndex.set(key, idx);
+          });
           const matrix = Array.from({ length: teams.length }, () => Array(teams.length).fill(null));
 
-          await Promise.all(teams.map((team) => fetchTeamResults(team, teamNameToIndex, matrix)));
+          await Promise.all(teams.map((team) => fetchTeamResults(team, teamNameToIndex, matrix, isDemPage)));
+          const filledCells = matrix.flat().filter((value) => value != null).length;
+          if (filledCells === 0) {
+            console.error(`${LOG_PREFIX} Cross table matrix is empty after fetching all teams.`);
+          } else {
+            console.info(`${LOG_PREFIX} Cross table matrix built`, { teams: teams.length, filledCells });
+          }
           renderCrossTable(table, teams, matrix);
           isBuilt = true;
         }
