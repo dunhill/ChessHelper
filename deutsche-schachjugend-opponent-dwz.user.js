@@ -12,15 +12,91 @@
   'use strict';
 
   const LOG_PREFIX = '[DSJ-DWZ]';
+  const NEW_DWZ_HEADER_CLASS = 'dsj-new-dwz-header';
+  const NEW_DWZ_CELL_CLASS = 'dsj-new-dwz-cell';
 
   function extractRating(titleText, type) {
     if (!titleText) return null;
     const match = titleText.match(new RegExp(`\\b${type}\\s+(\\d+)\\b`, 'i'));
-    return match ? match[1] : null;
+    return match ? Number(match[1]) : null;
   }
 
   function cleanPointsText(text) {
     return (text || '').replace(/\s*-\s*\d+\s*$/, '').trim();
+  }
+
+  function parseResultValue(text) {
+    const normalized = (text || '').trim();
+    if (!normalized) return null;
+    if (normalized === '1') return 1;
+    if (normalized === '0') return 0;
+    if (normalized === '½') return 0.5;
+    return null;
+  }
+
+  function parseCurrentDwz(cellText) {
+    const text = (cellText || '').trim();
+    if (!text) return null;
+    const numeric = Number(text.replace(/[^0-9]/g, ''));
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return numeric;
+  }
+
+  function calculateExpectedScore(playerDWZ, opponentDWZ) {
+    if (playerDWZ == null || opponentDWZ == null) return 0;
+    const diff = opponentDWZ - playerDWZ;
+    return 1 / (1 + Math.pow(10, diff / 400));
+  }
+
+  function calculateNewDWZ(playerDWZ, opponentRatings, opponentResults) {
+    const validOpponents = opponentRatings
+      .map((rating, index) => ({ rating, result: opponentResults[index] }))
+      .filter((entry) => entry.rating != null && entry.rating > 0 && entry.result != null);
+
+    if (playerDWZ == null || validOpponents.length === 0) return null;
+
+    const expectedSum = validOpponents.reduce(
+      (sum, opponent) => sum + calculateExpectedScore(playerDWZ, opponent.rating),
+      0
+    );
+    const scoreSum = validOpponents.reduce((sum, opponent) => sum + opponent.result, 0);
+    const correctionFactor = 20;
+    const delta = (scoreSum - expectedSum) * correctionFactor;
+    return Math.round(playerDWZ + delta);
+  }
+
+  function calculateInitialDwz(opponentRatings, opponentResults) {
+    const validOpponents = opponentRatings
+      .map((rating, index) => ({ rating, result: opponentResults[index] }))
+      .filter((entry) => entry.rating != null && entry.rating > 0 && entry.result != null);
+
+    // Relaxed rule requested by user: allow first DWZ from >=1 valid game.
+    if (validOpponents.length < 1) return null;
+
+    const scoreSum = validOpponents.reduce((sum, opponent) => sum + opponent.result, 0);
+    const targetAverage = scoreSum / validOpponents.length;
+    const clampedTarget = Math.min(0.99, Math.max(0.01, targetAverage));
+
+    let low = 100;
+    let high = 3000;
+    for (let i = 0; i < 40; i += 1) {
+      const mid = (low + high) / 2;
+      const expectedAverage =
+        validOpponents.reduce((sum, opponent) => sum + calculateExpectedScore(mid, opponent.rating), 0) /
+        validOpponents.length;
+
+      if (expectedAverage < clampedTarget) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+
+    const ri = Math.round((low + high) / 2);
+    if (ri <= 800) {
+      return Math.round(700 + ri / 8);
+    }
+    return ri;
   }
 
   function findScoreTextNode(cell) {
@@ -34,6 +110,16 @@
     return null;
   }
 
+  function getOrCreateTextNode(parent) {
+    const existing = Array.from(parent.childNodes).find(
+      (node) => node.nodeType === Node.TEXT_NODE
+    );
+    if (existing) return existing;
+    const node = document.createTextNode('');
+    parent.appendChild(node);
+    return node;
+  }
+
   function collectEntries(table) {
     const resultCells = Array.from(table.querySelectorAll('td.results, td.ergebnis'));
     const entries = [];
@@ -42,33 +128,32 @@
       const title = cell.getAttribute('title') || '';
       const dwz = extractRating(title, 'DWZ');
       const elo = extractRating(title, 'ELO');
+      const hasOpponent = /\bGegner\b/i.test(title);
 
       const link = cell.querySelector('a');
       if (link) {
-        const linkTextNode = Array.from(link.childNodes).find(
-          (node) => node.nodeType === Node.TEXT_NODE && cleanPointsText(node.textContent)
-        );
-        if (linkTextNode) {
-          entries.push({
-            textNode: linkTextNode,
-            originalText: linkTextNode.textContent,
-            points: cleanPointsText(linkTextNode.textContent),
-            dwz,
-            elo
-          });
-          continue;
-        }
+        const linkTextNode = getOrCreateTextNode(link);
+        entries.push({
+          textNode: linkTextNode,
+          originalText: linkTextNode.textContent,
+          points: cleanPointsText(linkTextNode.textContent),
+          dwz,
+          elo,
+          hasOpponent
+        });
+        continue;
       }
 
       const pointsNode = findScoreTextNode(cell);
-      if (!pointsNode) continue;
+      const targetTextNode = pointsNode || getOrCreateTextNode(cell);
 
       entries.push({
-        textNode: pointsNode,
-        originalText: pointsNode.textContent,
-        points: cleanPointsText(pointsNode.textContent),
+        textNode: targetTextNode,
+        originalText: targetTextNode.textContent,
+        points: cleanPointsText(targetTextNode.textContent),
         dwz,
-        elo
+        elo,
+        hasOpponent
       });
     }
 
@@ -77,8 +162,6 @@
 
   function applyMode(entries, mode) {
     for (const entry of entries) {
-      if (!entry.points) continue;
-
       if (mode === 'none') {
         entry.textNode.textContent = entry.originalText;
         continue;
@@ -90,11 +173,143 @@
         continue;
       }
 
-      entry.textNode.textContent = ` ${entry.points} - ${rating} `;
+      const pointsOrPending = entry.points || (entry.hasOpponent ? '?' : '');
+      if (!pointsOrPending) {
+        entry.textNode.textContent = entry.originalText;
+        continue;
+      }
+
+      entry.textNode.textContent = ` ${pointsOrPending} - ${rating} `;
     }
   }
 
-  function renderToggle(heading, entries) {
+  function findDwzColumnIndex(table) {
+    const headerCells = Array.from(table.querySelectorAll('thead tr th'));
+    return headerCells.findIndex((th) => {
+      const abbr = th.querySelector('abbr');
+      const title = (abbr?.getAttribute('title') || '').toLowerCase();
+      const text = (abbr?.textContent || th.textContent || '').toLowerCase().trim();
+      return title.includes('deutsche wertungszahl') || text === 'dwz';
+    });
+  }
+
+  function collectRowCalculations(table, dwzColumnIndex) {
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    const calculations = [];
+
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('td'));
+      const currentDwz = parseCurrentDwz(cells[dwzColumnIndex]?.textContent || '');
+
+      const gameCells = cells.filter((cell) => cell.matches('td.results, td.ergebnis'));
+      const opponentRatings = [];
+      const opponentResults = [];
+
+      for (const cell of gameCells) {
+        const title = cell.getAttribute('title') || '';
+        const oppDwz = extractRating(title, 'DWZ');
+        if (oppDwz == null) continue;
+
+        const resultTextNode = findScoreTextNode(cell);
+        const resultText = cleanPointsText(resultTextNode ? resultTextNode.textContent : cell.textContent);
+        const resultValue = parseResultValue(resultText);
+        if (resultValue == null) continue;
+
+        opponentRatings.push(oppDwz);
+        opponentResults.push(resultValue);
+      }
+
+      if (currentDwz == null) {
+        const initialDwz = calculateInitialDwz(opponentRatings, opponentResults);
+        if (initialDwz == null) {
+          console.info(`${LOG_PREFIX} No current DWZ and insufficient valid games for first DWZ estimate.`, {
+            rowId: row.id || null
+          });
+          calculations.push(null);
+          continue;
+        }
+
+        calculations.push({
+          currentDwz: null,
+          newDwz: initialDwz,
+          delta: null,
+          isFirstDwz: true
+        });
+        continue;
+      }
+
+      const newDwz = calculateNewDWZ(currentDwz, opponentRatings, opponentResults);
+      if (newDwz == null) {
+        calculations.push(null);
+        continue;
+      }
+
+      calculations.push({
+        currentDwz,
+        newDwz,
+        delta: newDwz - currentDwz,
+        isFirstDwz: false
+      });
+    }
+
+    return calculations;
+  }
+
+  function removeNewDwzColumn(table) {
+    table.querySelectorAll(`.${NEW_DWZ_HEADER_CLASS}, .${NEW_DWZ_CELL_CLASS}`).forEach((el) => el.remove());
+  }
+
+  function renderNewDwzColumn(table) {
+    removeNewDwzColumn(table);
+
+    const dwzColumnIndex = findDwzColumnIndex(table);
+    if (dwzColumnIndex < 0) {
+      console.info(`${LOG_PREFIX} Could not find DWZ header for new DWZ column.`);
+      return;
+    }
+
+    const headerRow = table.querySelector('thead tr');
+    if (!headerRow) return;
+
+    const calculations = collectRowCalculations(table, dwzColumnIndex);
+
+    const newHeader = document.createElement('th');
+    newHeader.className = NEW_DWZ_HEADER_CLASS;
+    const newHeaderAbbr = document.createElement('abbr');
+    newHeaderAbbr.title = 'Nur Vermuttung und kein offizieles DWZ';
+    newHeaderAbbr.textContent = 'new DWZ';
+    newHeader.appendChild(newHeaderAbbr);
+    headerRow.insertBefore(newHeader, headerRow.children[dwzColumnIndex + 1] || null);
+
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    rows.forEach((row, idx) => {
+      const cell = document.createElement('td');
+      cell.className = NEW_DWZ_CELL_CLASS;
+
+      const calc = calculations[idx];
+      if (!calc) {
+        cell.textContent = '';
+      } else if (calc.isFirstDwz) {
+        const tag = document.createElement('span');
+        tag.textContent = ' (neu)';
+        tag.style.color = '#555';
+        cell.textContent = `${calc.newDwz}`;
+        cell.appendChild(tag);
+      } else {
+        const deltaText = calc.delta > 0 ? `+${calc.delta}` : `${calc.delta}`;
+        const deltaSpan = document.createElement('span');
+        deltaSpan.textContent = ` (${deltaText})`;
+        if (calc.delta > 0) deltaSpan.style.color = 'green';
+        if (calc.delta < 0) deltaSpan.style.color = 'red';
+        cell.textContent = `${calc.newDwz}`;
+        cell.appendChild(deltaSpan);
+      }
+
+      row.insertBefore(cell, row.children[dwzColumnIndex + 1] || null);
+    });
+  }
+
+  function renderToggle(heading, entries, table) {
     if (!heading || heading.querySelector('.dsj-rating-toggle')) return;
 
     const wrapper = document.createElement('span');
@@ -112,6 +327,7 @@
 
     let activeMode = 'none';
     const anchors = new Map();
+    let newDwzEnabled = false;
 
     function refreshActiveLink() {
       for (const [key, anchor] of anchors) {
@@ -138,7 +354,26 @@
       }
     });
 
+    const newDwzWrapper = document.createElement('span');
+    newDwzWrapper.style.marginLeft = '0.75em';
+    const newDwzLink = document.createElement('a');
+    newDwzLink.href = '#';
+    newDwzLink.textContent = 'new DWZ';
+    newDwzLink.style.fontWeight = 'normal';
+    newDwzLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      newDwzEnabled = !newDwzEnabled;
+      if (newDwzEnabled) {
+        renderNewDwzColumn(table);
+      } else {
+        removeNewDwzColumn(table);
+      }
+      newDwzLink.style.fontWeight = newDwzEnabled ? 'bold' : 'normal';
+    });
+    newDwzWrapper.appendChild(newDwzLink);
+
     heading.appendChild(wrapper);
+    heading.appendChild(newDwzWrapper);
     refreshActiveLink();
   }
 
@@ -159,7 +394,7 @@
       const heading = container.previousElementSibling?.matches('h3')
         ? container.previousElementSibling
         : null;
-      renderToggle(heading, entries);
+      renderToggle(heading, entries, table);
       applyMode(entries, 'none');
     }
 
