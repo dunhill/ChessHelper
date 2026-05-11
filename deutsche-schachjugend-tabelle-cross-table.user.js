@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Deutsche Schachjugend - Tabelle Cross Table Toggle
+// @name         Deutsche Schachjugend - Tabelle Cross Table and Board Results Toggle
 // @namespace    https://github.com/oleksiy/ChessHelper
-// @version      1.0
-// @description  Adds a toggle to show/hide cross-table results on DSJ tabelle pages.
+// @version      1.1
+// @description  Adds toggles to show/hide cross-table and board results on DSJ tabelle pages.
 // @match        *://www.deutsche-schachjugend.de/*
 // @grant        none
 // @run-at       document-end
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const LOG_PREFIX = '[DSJ-CrossTable]';
+  const LOG_PREFIX = '[DSJ-Tabelle]';
   const CROSS_CLASS = 'dsj-cross-cell';
 
   function isTargetPage() {
@@ -35,6 +35,10 @@
   function parsePoints(rawText) {
     const text = (rawText || '').trim();
     if (!text) return null;
+
+    // Handle special symbols
+    if (text === '-') return 0;
+    if (text === '+') return 1;
 
     const normalized = text
       .replace(',', '.')
@@ -80,7 +84,7 @@
     }
     const doubled = value * 2;
     const hasHalfPrecision = Math.abs(doubled - Math.round(doubled)) < 1e-9;
-    if (value < 0 || value > 4 || !hasHalfPrecision) {
+    if (value < 0 || value > 8 || !hasHalfPrecision) {
       console.error(`${LOG_PREFIX} Invalid points range/precision`, { ...context, value });
       return false;
     }
@@ -248,75 +252,45 @@
 
       const homePoints = parseDemSidePoints(resultMatch[1]);
       const awayPoints = parseDemSidePoints(resultMatch[2]);
-
       if (homePoints == null || awayPoints == null) {
-        console.error(`${LOG_PREFIX} DEM result points are invalid`, {
+        console.error(`${LOG_PREFIX} DEM row points could not be parsed`, {
           team: team.name,
-          resultText,
-          index
+          index,
+          resultText
         });
         continue;
       }
 
-      const currentTeamCanonical = canonicalizeName(team.name);
-      const homeCanonical = canonicalizeName(homeName);
-      const awayCanonical = canonicalizeName(awayName);
-      const teamIsHome = homeCanonical === currentTeamCanonical;
-      const teamIsAway = awayCanonical === currentTeamCanonical;
-      if (!teamIsHome && !teamIsAway) {
-        console.error(`${LOG_PREFIX} Current team not found in DEM row`, {
+      const homeIndex = teamNameToIndex.get(canonicalizeName(homeName));
+      const awayIndex = teamNameToIndex.get(canonicalizeName(awayName));
+      if (homeIndex == null || awayIndex == null) {
+        console.error(`${LOG_PREFIX} DEM team not found in team list`, {
           team: team.name,
           homeName,
-          awayName,
-          index
+          awayName
         });
         continue;
       }
 
-      const opponentName = teamIsHome ? awayName : homeName;
-      const opponentIndex = teamNameToIndex.get(canonicalizeName(opponentName));
-      if (opponentIndex == null) {
-        console.error(`${LOG_PREFIX} Opponent not found in team list`, {
-          team: team.name,
-          opponent: opponentName,
-          url: team.href
-        });
-        continue;
-      }
-
-      const pointsValue = teamIsHome ? homePoints : awayPoints;
-      const isValid = validatePoints(pointsValue, {
-        team: team.name,
-        opponent: opponentName,
-        rawPoints: resultText,
-        url: team.href
-      });
-      if (!isValid) continue;
-
-      matrix[teamNameToIndex.get(currentTeamCanonical)][opponentIndex] = pointsValue;
+      matrix[homeIndex][awayIndex] = homePoints;
+      matrix[awayIndex][homeIndex] = awayPoints;
     }
   }
 
   async function fetchTeamResults(team, teamNameToIndex, matrix, isDemPage) {
     try {
-      console.info(`${LOG_PREFIX} Fetching team page`, { team: team.name, url: team.href, mode: isDemPage ? 'dem' : 'classic' });
-      const response = await fetch(team.href, { credentials: 'same-origin' });
+      const response = await fetch(team.href);
       if (!response.ok) {
-        console.error(`${LOG_PREFIX} Failed to fetch team page`, { team: team.name, url: team.href, status: response.status });
+        console.error(`${LOG_PREFIX} Failed to fetch team page`, { team: team.name, status: response.status });
         return;
       }
 
       const html = await response.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      const resultsTable = isDemPage
-        ? doc.querySelector('div.results table.spieler')
-        : doc.querySelector('div.results table');
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const resultsTable = doc.querySelector('div.results table');
       if (!resultsTable) {
-        console.error(`${LOG_PREFIX} Team page has no expected results table`, {
-          team: team.name,
-          url: team.href,
-          expected: isDemPage ? 'div.results table.spieler' : 'div.results table'
-        });
+        console.error(`${LOG_PREFIX} No results table found on team page`, { team: team.name });
         return;
       }
 
@@ -326,88 +300,72 @@
         await fetchClassicTeamResults(team, teamNameToIndex, matrix, resultsTable);
       }
     } catch (error) {
-      console.error(`${LOG_PREFIX} Unexpected error while fetching team results`, {
-        team: team.name,
-        url: team.href,
-        error
-      });
+      console.error(`${LOG_PREFIX} Error fetching team results`, { team: team.name, error });
     }
-  }
-
-  function applyVisibility(table, visible) {
-    const cells = table.querySelectorAll(`.${CROSS_CLASS}`);
-    cells.forEach((cell) => {
-      cell.style.display = visible ? '' : 'none';
-    });
   }
 
   function renderCrossTable(table, teams, matrix) {
-    const headerRow = table.querySelector('thead tr');
-    const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
-    if (!headerRow) {
-      console.error(`${LOG_PREFIX} Missing header row on tabelle page.`);
-      return;
-    }
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
 
-    const originalHeaderCount = headerRow.children.length;
-    const lastOriginalHeaderCell = headerRow.children[originalHeaderCount - 1];
-    if (lastOriginalHeaderCell) {
-      lastOriginalHeaderCell.classList.add('bxv');
-    }
-    bodyRows.forEach((row) => {
-      const lastOriginalBodyCell = row.children[originalHeaderCount - 1];
-      if (lastOriginalBodyCell) {
-        lastOriginalBodyCell.classList.add('bxv');
-      }
-    });
+    // Add cross table header row
+    const crossHeaderRow = document.createElement('tr');
+    crossHeaderRow.className = CROSS_CLASS;
+    const emptyTh = document.createElement('th');
+    emptyTh.colSpan = 2;
+    crossHeaderRow.appendChild(emptyTh);
 
-    const separatorSample = table.querySelector('th.tsum, td.tsum');
-    const separatorBorderLeft = separatorSample
-      ? getComputedStyle(separatorSample).borderLeft
-      : '';
-    const crossColumnWidth = '3ch';
-
-    for (let colIndex = 0; colIndex < teams.length; colIndex += 1) {
-      const team = teams[colIndex];
+    teams.forEach((team) => {
       const th = document.createElement('th');
       th.className = CROSS_CLASS;
       th.textContent = team.position;
-      th.title = team.name;
-      th.style.width = crossColumnWidth;
-      th.style.minWidth = crossColumnWidth;
-      th.style.maxWidth = crossColumnWidth;
-      th.style.whiteSpace = 'nowrap';
-      th.style.textAlign = 'center';
-      if (colIndex === 0 && separatorBorderLeft) {
-        th.style.borderLeft = separatorBorderLeft;
-      }
-      headerRow.appendChild(th);
-    }
+      crossHeaderRow.appendChild(th);
+    });
 
-    for (let rowIndex = 0; rowIndex < bodyRows.length; rowIndex += 1) {
-      const row = bodyRows[rowIndex];
-      for (let colIndex = 0; colIndex < teams.length; colIndex += 1) {
+    thead.appendChild(crossHeaderRow);
+
+    // Add cross table rows
+    teams.forEach((team, rowIndex) => {
+      const row = document.createElement('tr');
+      row.className = CROSS_CLASS;
+
+      // Position and name cells
+      const posTd = document.createElement('td');
+      posTd.className = CROSS_CLASS;
+      posTd.textContent = team.position;
+      row.appendChild(posTd);
+
+      const nameTd = document.createElement('td');
+      nameTd.className = CROSS_CLASS;
+      const link = document.createElement('a');
+      link.href = team.href;
+      link.textContent = team.name;
+      nameTd.appendChild(link);
+      row.appendChild(nameTd);
+
+      // Result cells
+      teams.forEach((opponent, colIndex) => {
         const td = document.createElement('td');
         td.className = CROSS_CLASS;
-        td.style.width = crossColumnWidth;
-        td.style.minWidth = crossColumnWidth;
-        td.style.maxWidth = crossColumnWidth;
-        td.style.whiteSpace = 'nowrap';
-        td.style.textAlign = 'center';
-        if (colIndex === 0 && separatorBorderLeft) {
-          td.style.borderLeft = separatorBorderLeft;
-        }
-
         if (rowIndex === colIndex) {
           td.textContent = '–';
         } else {
           td.textContent = formatPoints(matrix[rowIndex][colIndex]);
         }
         row.appendChild(td);
-      }
-    }
+      });
+
+      tbody.appendChild(row);
+    });
 
     applyVisibility(table, false);
+  }
+
+  function applyVisibility(table, isVisible) {
+    const crossCells = table.querySelectorAll(`.${CROSS_CLASS}`);
+    crossCells.forEach((cell) => {
+      cell.style.display = isVisible ? '' : 'none';
+    });
   }
 
   function relaxTableLayout(resultsContainer, table) {
@@ -422,24 +380,356 @@
     });
   }
 
+  class BoardResults {
+    constructor() {
+      this.boards = new Map(); // boardNumber -> Map(playerName -> { total: 0, rounds: {round: {points, opponentInfo}}, team: teamName, teamHref: string })
+      this.playerIndex = new Map(); // "playerName" -> { team, teamHref, dwz, elo }
+      this.allPlayerBoardAppearances = new Map(); // "playerName_teamName" -> Set of boardNumbers
+    }
+
+    addPlayerInfo(playerName, team, teamHref, dwz, elo) {
+      const key = normalizeName(playerName);
+      this.playerIndex.set(key, { team, teamHref, dwz, elo });
+    }
+
+    getPlayerInfo(playerName) {
+      const key = normalizeName(playerName);
+      return this.playerIndex.get(key);
+    }
+
+    addResult(teamName, teamHref, playerName, boardNumber, roundNumber, points, opponentInfo = {}) {
+      if (!this.boards.has(boardNumber)) {
+        this.boards.set(boardNumber, new Map());
+      }
+      const board = this.boards.get(boardNumber);
+      if (!board.has(playerName)) {
+        board.set(playerName, { total: 0, rounds: {}, team: teamName, teamHref: teamHref, bhz: 0 });
+      }
+      const player = board.get(playerName);
+      player.rounds[roundNumber] = { points, opponentInfo };
+      player.total += points;
+
+      // Track board appearances
+      const appearanceKey = `${playerName}_${teamName}`;
+      if (!this.allPlayerBoardAppearances.has(appearanceKey)) {
+        this.allPlayerBoardAppearances.set(appearanceKey, new Set());
+      }
+      this.allPlayerBoardAppearances.get(appearanceKey).add(boardNumber);
+    }
+
+    isMultiBoardPlayer(playerName, teamName) {
+      const key = `${playerName}_${teamName}`;
+      const boards = this.allPlayerBoardAppearances.get(key);
+      return boards && boards.size > 1;
+    }
+
+    getSortedPlayers(boardNumber) {
+      const board = this.boards.get(boardNumber);
+      if (!board) return [];
+      return Array.from(board.entries()).sort((a, b) => b[1].total - a[1].total);
+    }
+
+    getMaxRounds() {
+      let max = 0;
+      for (const board of this.boards.values()) {
+        for (const player of board.values()) {
+          max = Math.max(max, ...Object.keys(player.rounds).map(Number));
+        }
+      }
+      return max;
+    }
+
+    calculateBhzForBoard(boardNumber) {
+      const board = this.boards.get(boardNumber);
+      if (!board) return;
+
+      // For each player on this board
+      for (const [playerName, playerData] of board.entries()) {
+        let bhz = 0;
+
+        // For each round they played
+        for (const roundNum in playerData.rounds) {
+          const roundData = playerData.rounds[roundNum];
+          if (!roundData || !roundData.opponentInfo) continue;
+
+          const opponentName = roundData.opponentInfo.name;
+          if (!opponentName) continue;
+
+          // Find opponent in the same board
+          const opponent = board.get(opponentName);
+          if (opponent) {
+            // Add opponent's total points to Bhz
+            bhz += opponent.total;
+          }
+        }
+
+        playerData.bhz = bhz;
+      }
+    }
+
+    calculateAllBhz() {
+      for (const boardNumber of this.boards.keys()) {
+        this.calculateBhzForBoard(boardNumber);
+      }
+    }
+  }
+
+  function parseOpponentFromTitle(titleText) {
+    if (!titleText) return {};
+
+    // Format: "mit Weiß gegen Karolina Balcytis · DWZ 1653 · Elo 1713"
+    const opponentMatch = titleText.match(/gegen\s+(.+?)(?:\s*·|$)/);
+    const name = opponentMatch ? normalizeName(opponentMatch[1]) : '';
+
+    const dwzMatch = titleText.match(/DWZ\s+(\d+)/);
+    const dwz = dwzMatch ? dwzMatch[1] : null;
+
+    const eloMatch = titleText.match(/Elo\s+(\d+)/);
+    const elo = eloMatch ? eloMatch[1] : null;
+
+    return { name, dwz, elo, team: null, teamHref: null };
+  }
+
+  async function fetchBoardResults(team, boardResults) {
+    try {
+      const response = await fetch(team.href);
+      if (!response.ok) {
+        console.error(`${LOG_PREFIX} Failed to fetch team page for board results`, { team: team.name, status: response.status });
+        return;
+      }
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const resultsTable = doc.querySelector('div.results table');
+      if (!resultsTable) {
+        console.error(`${LOG_PREFIX} No results table found on team page for board results`, { team: team.name });
+        return;
+      }
+
+      // Extract and index player info from the table
+      const bodyRows = Array.from(resultsTable.querySelectorAll('tbody tr'));
+      bodyRows.forEach((row) => {
+        const nameCell = row.querySelector('td:nth-child(2)');
+        const playerName = normalizeName(nameCell?.textContent || '');
+        if (!playerName) return;
+
+        const dwzCell = row.querySelector('td:nth-child(5)');
+        const dwz = normalizeName(dwzCell?.textContent || '');
+
+        const eloCell = row.querySelector('td:nth-child(6)');
+        const eloText = eloCell?.querySelector('a')?.textContent || eloCell?.textContent || '';
+        const elo = normalizeName(eloText);
+
+        boardResults.addPlayerInfo(playerName, team.name, team.href, dwz, elo);
+      });
+
+      const headerRow = resultsTable.querySelector('thead tr');
+      const roundHeaders = Array.from(headerRow.querySelectorAll('th.number a[title]'));
+
+      // For each round
+      roundHeaders.forEach((header) => {
+        const title = header.getAttribute('title') || '';
+        const roundMatch = title.match(/Runde (\d+)/);
+        if (!roundMatch) return;
+        const actualRound = parseInt(roundMatch[1]);
+
+        // Find column index
+        const headerCell = header.closest('th');
+        const columnIndex = Array.from(headerRow.children).indexOf(headerCell);
+
+        // Collect players with results in this column
+        const playersWithResults = [];
+        bodyRows.forEach((row) => {
+          const cell = row.children[columnIndex];
+          if (!cell || !cell.classList.contains('ergebnis')) return;
+
+          const resultText = normalizeName(cell.textContent || '');
+          if (!resultText) return;
+
+          const points = parsePoints(resultText);
+          if (points == null) return;
+
+          const nameCell = row.querySelector('td:nth-child(2)');
+          const playerName = normalizeName(nameCell?.textContent || '');
+          if (!playerName) return;
+
+          // Extract opponent info from title
+          const cellTitle = cell.getAttribute('title') || '';
+          const opponentInfo = parseOpponentFromTitle(cellTitle);
+
+          // Enrich opponent info with data from playerIndex
+          const playerInfo = boardResults.getPlayerInfo(opponentInfo.name);
+          if (playerInfo) {
+            opponentInfo.team = playerInfo.team;
+            opponentInfo.teamHref = playerInfo.teamHref;
+            if (!opponentInfo.dwz) opponentInfo.dwz = playerInfo.dwz;
+            if (!opponentInfo.elo) opponentInfo.elo = playerInfo.elo;
+          }
+
+          playersWithResults.push({ playerName, points, opponentInfo });
+        });
+
+        // Assign boards: first is board 1, etc.
+        playersWithResults.forEach((item, boardIndex) => {
+          const boardNumber = boardIndex + 1;
+          boardResults.addResult(team.name, team.href, item.playerName, boardNumber, actualRound, item.points, item.opponentInfo);
+        });
+      });
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error fetching board results for team`, { team: team.name, error });
+    }
+  }
+
+  function renderBoardTables(resultsContainer, boardResults) {
+    // Calculate Bhz for all boards in two-pass mode
+    boardResults.calculateAllBhz();
+
+    const maxRounds = boardResults.getMaxRounds();
+    const roundHeaders = Array.from({ length: maxRounds }, (_, i) => `R${i + 1}`);
+    for (let boardNumber = 1; boardNumber <= 5; boardNumber++) {
+      const sortedPlayers = boardResults.getSortedPlayers(boardNumber);
+      if (sortedPlayers.length === 0) continue;
+      const table = document.createElement('table');
+      table.className = 'board-results-table';
+      table.style.display = 'none'; // hidden by default
+      // Header
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+
+      const thRank = document.createElement('th');
+      thRank.textContent = '#';
+      thRank.style.textAlign = 'right';
+      headerRow.appendChild(thRank);
+
+      const thPlayer = document.createElement('th');
+      thPlayer.textContent = `Brett ${boardNumber} - Spieler`;
+      headerRow.appendChild(thPlayer);
+
+      const thTotal = document.createElement('th');
+      thTotal.textContent = 'Gesamt';
+      thTotal.style.textAlign = 'center';
+      headerRow.appendChild(thTotal);
+
+      const thBhz = document.createElement('th');
+      thBhz.textContent = 'Bhz';
+      thBhz.style.textAlign = 'center';
+      headerRow.appendChild(thBhz);
+
+      roundHeaders.forEach(round => {
+        const th = document.createElement('th');
+        th.textContent = round;
+        th.style.textAlign = 'center';
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // Body
+      const tbody = document.createElement('tbody');
+      sortedPlayers.forEach(([playerName, data], rank) => {
+        const row = document.createElement('tr');
+
+        // Rank column
+        const tdRank = document.createElement('td');
+        tdRank.textContent = rank + 1;
+        tdRank.style.textAlign = 'right';
+        row.appendChild(tdRank);
+
+        // Player name and team
+        const tdPlayer = document.createElement('td');
+        let playerDisplay = playerName;
+        if (boardResults.isMultiBoardPlayer(playerName, data.team)) {
+          playerDisplay += '*';
+        }
+
+        // Create team link
+        const teamLink = document.createElement('a');
+        teamLink.href = data.teamHref;
+        teamLink.textContent = `${playerDisplay} (${data.team})`;
+        tdPlayer.appendChild(teamLink);
+        row.appendChild(tdPlayer);
+
+        // Total points
+        const tdTotal = document.createElement('td');
+        tdTotal.textContent = formatPoints(data.total);
+        tdTotal.style.textAlign = 'center';
+        row.appendChild(tdTotal);
+
+        // Bhz (pre-calculated in two-pass mode)
+        const tdBhz = document.createElement('td');
+        tdBhz.textContent = formatPoints(data.bhz);
+        tdBhz.style.textAlign = 'center';
+        row.appendChild(tdBhz);
+
+        // Round results
+        roundHeaders.forEach((_, i) => {
+          const roundNum = i + 1;
+          const roundData = data.rounds[roundNum];
+          const td = document.createElement('td');
+          td.style.textAlign = 'center';
+
+          if (roundData) {
+            td.textContent = formatPoints(roundData.points);
+
+            if (roundData.opponentInfo) {
+              const opponent = roundData.opponentInfo;
+              const titleParts = [];
+              if (opponent.name) titleParts.push(opponent.name);
+              if (opponent.team) titleParts.push(opponent.team);
+              if (opponent.dwz) titleParts.push(`DWZ: ${opponent.dwz}`);
+              if (opponent.elo) titleParts.push(`Elo: ${opponent.elo}`);
+
+              if (titleParts.length > 0) {
+                td.title = titleParts.join('\n');
+              }
+            }
+          }
+
+          row.appendChild(td);
+        });
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      resultsContainer.appendChild(table);
+    }
+  }
+
+  function applyBoardVisibility(resultsContainer, isVisible) {
+    const tables = resultsContainer.querySelectorAll('.board-results-table');
+    tables.forEach(table => {
+      table.style.display = isVisible ? 'table' : 'none';
+    });
+  }
+
   function setToggleVisualState(link, isOn) {
     link.style.fontWeight = isOn ? 'bold' : 'normal';
   }
 
-  function createToggle(mainHeading, onToggle) {
-    const spacer = document.createTextNode(' ');
-    const link = document.createElement('a');
-    link.href = '#';
-    link.textContent = 'Kreuztabelle';
-    setToggleVisualState(link, false);
-
-    link.addEventListener('click', async (event) => {
+  function createToggles(mainHeading, onCrossToggle, onBoardToggle) {
+    const spacer1 = document.createTextNode(' ');
+    const link1 = document.createElement('a');
+    link1.href = '#';
+    link1.textContent = 'Kreuztabelle';
+    setToggleVisualState(link1, false);
+    link1.addEventListener('click', async (event) => {
       event.preventDefault();
-      await onToggle(link);
+      await onCrossToggle(link1);
     });
-
-    mainHeading.appendChild(spacer);
-    mainHeading.appendChild(link);
+    mainHeading.appendChild(spacer1);
+    mainHeading.appendChild(link1);
+    const spacer2 = document.createTextNode(' ');
+    const link2 = document.createElement('a');
+    link2.href = '#';
+    link2.textContent = 'Brett Ergebnisse';
+    setToggleVisualState(link2, false);
+    link2.addEventListener('click', async (event) => {
+      event.preventDefault();
+      await onBoardToggle(link2);
+    });
+    mainHeading.appendChild(spacer2);
+    mainHeading.appendChild(link2);
   }
 
   async function run() {
@@ -460,19 +750,21 @@
 
     relaxTableLayout(resultsContainer, table);
 
-    let isBuilt = false;
-    let isVisible = false;
+    let crossIsBuilt = false;
+    let crossIsVisible = false;
+    let boardIsBuilt = false;
+    let boardIsVisible = false;
+    const boardResults = new BoardResults();
     const isDemPage = /\/dem(?:-|\/|$)/i.test(window.location.pathname) || document.body.classList.contains('dem');
 
-    createToggle(mainHeading, async (toggleLink) => {
+    createToggles(mainHeading, async (toggleLink) => {
       try {
-        if (!isBuilt) {
+        if (!crossIsBuilt) {
           const teams = parseTeams(table, isDemPage);
           if (teams.length === 0) {
             console.error(`${LOG_PREFIX} No teams parsed from main table.`);
             return;
           }
-
           const teamNameToIndex = new Map();
           teams.forEach((team, idx) => {
             const key = canonicalizeName(team.name);
@@ -485,7 +777,6 @@
             teamNameToIndex.set(key, idx);
           });
           const matrix = Array.from({ length: teams.length }, () => Array(teams.length).fill(null));
-
           await Promise.all(teams.map((team) => fetchTeamResults(team, teamNameToIndex, matrix, isDemPage)));
           const filledCells = matrix.flat().filter((value) => value != null).length;
           if (filledCells === 0) {
@@ -494,14 +785,32 @@
             console.info(`${LOG_PREFIX} Cross table matrix built`, { teams: teams.length, filledCells });
           }
           renderCrossTable(table, teams, matrix);
-          isBuilt = true;
+          crossIsBuilt = true;
         }
-
-        isVisible = !isVisible;
-        applyVisibility(table, isVisible);
-        setToggleVisualState(toggleLink, isVisible);
+        crossIsVisible = !crossIsVisible;
+        applyVisibility(table, crossIsVisible);
+        setToggleVisualState(toggleLink, crossIsVisible);
       } catch (error) {
         console.error(`${LOG_PREFIX} Error while toggling cross table`, error);
+        setToggleVisualState(toggleLink, false);
+      }
+    }, async (toggleLink) => {
+      try {
+        if (!boardIsBuilt) {
+          const teams = parseTeams(table, isDemPage);
+          if (teams.length === 0) {
+            console.error(`${LOG_PREFIX} No teams parsed from main table.`);
+            return;
+          }
+          await Promise.all(teams.map((team) => fetchBoardResults(team, boardResults)));
+          renderBoardTables(resultsContainer, boardResults);
+          boardIsBuilt = true;
+        }
+        boardIsVisible = !boardIsVisible;
+        applyBoardVisibility(resultsContainer, boardIsVisible);
+        setToggleVisualState(toggleLink, boardIsVisible);
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error while toggling board results`, error);
         setToggleVisualState(toggleLink, false);
       }
     });
