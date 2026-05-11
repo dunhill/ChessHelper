@@ -62,7 +62,11 @@
     const scoreSum = validOpponents.reduce((sum, opponent) => sum + opponent.result, 0);
     const correctionFactor = 20;
     const delta = (scoreSum - expectedSum) * correctionFactor;
-    return Math.round(playerDWZ + delta);
+    return {
+      newDwz: Math.round(playerDWZ + delta),
+      expectedSum,
+      scoreSum
+    };
   }
 
   function calculateInitialDwz(opponentRatings, opponentResults) {
@@ -93,10 +97,20 @@
     }
 
     const ri = Math.round((low + high) / 2);
-    if (ri <= 800) {
-      return Math.round(700 + ri / 8);
-    }
-    return ri;
+    const newDwz = ri <= 800 ? Math.round(700 + ri / 8) : ri;
+    const expectedSum = validOpponents.reduce(
+      (sum, opponent) => sum + calculateExpectedScore(newDwz, opponent.rating),
+      0
+    );
+    return {
+      newDwz,
+      expectedSum,
+      scoreSum
+    };
+  }
+
+  function stripExpectedSuffix(title) {
+    return (title || '').replace(/\s*·\s*Erwartet\s*[0-9]+(?:[.,][0-9]+)?\s*$/i, '').trim();
   }
 
   function findScoreTextNode(cell) {
@@ -204,6 +218,7 @@
       const gameCells = cells.filter((cell) => cell.matches('td.results, td.ergebnis'));
       const opponentRatings = [];
       const opponentResults = [];
+      const gameDetails = [];
 
       for (const cell of gameCells) {
         const title = cell.getAttribute('title') || '';
@@ -217,11 +232,12 @@
 
         opponentRatings.push(oppDwz);
         opponentResults.push(resultValue);
+        gameDetails.push({ cell, oppDwz, resultValue });
       }
 
       if (currentDwz == null) {
-        const initialDwz = calculateInitialDwz(opponentRatings, opponentResults);
-        if (initialDwz == null) {
+        const initialCalc = calculateInitialDwz(opponentRatings, opponentResults);
+        if (initialCalc == null) {
           console.info(`${LOG_PREFIX} No current DWZ and insufficient valid games for first DWZ estimate.`, {
             rowId: row.id || null
           });
@@ -231,24 +247,30 @@
 
         calculations.push({
           currentDwz: null,
-          newDwz: initialDwz,
+          newDwz: initialCalc.newDwz,
           delta: null,
-          isFirstDwz: true
+          isFirstDwz: true,
+          expectedSum: initialCalc.expectedSum,
+          scoreSum: initialCalc.scoreSum,
+          gameDetails
         });
         continue;
       }
 
-      const newDwz = calculateNewDWZ(currentDwz, opponentRatings, opponentResults);
-      if (newDwz == null) {
+      const updateCalc = calculateNewDWZ(currentDwz, opponentRatings, opponentResults);
+      if (updateCalc == null) {
         calculations.push(null);
         continue;
       }
 
       calculations.push({
         currentDwz,
-        newDwz,
-        delta: newDwz - currentDwz,
-        isFirstDwz: false
+        newDwz: updateCalc.newDwz,
+        delta: updateCalc.newDwz - currentDwz,
+        isFirstDwz: false,
+        expectedSum: updateCalc.expectedSum,
+        scoreSum: updateCalc.scoreSum,
+        gameDetails
       });
     }
 
@@ -305,7 +327,22 @@
         cell.appendChild(deltaSpan);
       }
 
+      if (calc) {
+        cell.title = `Erwartete Punkte: ${calc.expectedSum.toFixed(2)} · Erzielte Punkte: ${calc.scoreSum.toFixed(2)}`;
+      }
+
       row.insertBefore(cell, row.children[dwzColumnIndex + 1] || null);
+    });
+
+    calculations.forEach((calc) => {
+      if (!calc) return;
+      const ratingForExpectation = calc.currentDwz != null ? calc.currentDwz : calc.newDwz;
+      calc.gameDetails.forEach((detail) => {
+        const expected = calculateExpectedScore(ratingForExpectation, detail.oppDwz).toFixed(2);
+        const baseTitle = stripExpectedSuffix(detail.cell.getAttribute('title') || '');
+        const combined = `${baseTitle} · Erwartet ${expected}`.trim();
+        detail.cell.setAttribute('title', combined);
+      });
     });
   }
 
