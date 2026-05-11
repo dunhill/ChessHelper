@@ -278,7 +278,35 @@
   }
 
   function removeNewDwzColumn(table) {
+    const hasColumn = table.querySelector(`.${NEW_DWZ_HEADER_CLASS}`) !== null;
     table.querySelectorAll(`.${NEW_DWZ_HEADER_CLASS}, .${NEW_DWZ_CELL_CLASS}`).forEach((el) => el.remove());
+
+    // Decrement colspan in tfoot only if column was present
+    if (hasColumn) {
+      const tfoot = table.querySelector('tfoot');
+      if (tfoot) {
+        const tfootRows = tfoot.querySelectorAll('tr');
+        tfootRows.forEach((row) => {
+          const secondTh = row.querySelector('th:nth-child(2)');
+          if (secondTh) {
+            const currentColspan = parseInt(secondTh.getAttribute('colspan') || 1);
+            if (currentColspan > 1) {
+              secondTh.setAttribute('colspan', currentColspan - 1);
+            }
+          }
+        });
+      }
+    }
+
+    // Restore original titles by stripping expected suffix
+    const resultCells = table.querySelectorAll('td.results, td.ergebnis');
+    resultCells.forEach(cell => {
+      const title = cell.getAttribute('title');
+      if (title) {
+        const stripped = stripExpectedSuffix(title);
+        cell.setAttribute('title', stripped);
+      }
+    });
   }
 
   function renderNewDwzColumn(table) {
@@ -333,6 +361,19 @@
 
       row.insertBefore(cell, row.children[dwzColumnIndex + 1] || null);
     });
+
+    // Increment colspan in tfoot
+    const tfoot = table.querySelector('tfoot');
+    if (tfoot) {
+      const tfootRows = tfoot.querySelectorAll('tr');
+      tfootRows.forEach((row) => {
+        const secondTh = row.querySelector('th:nth-child(2)');
+        if (secondTh) {
+          const currentColspan = parseInt(secondTh.getAttribute('colspan') || 1);
+          secondTh.setAttribute('colspan', currentColspan + 1);
+        }
+      });
+    }
 
     calculations.forEach((calc) => {
       if (!calc) return;
