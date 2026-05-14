@@ -308,40 +308,34 @@
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
 
-    // Add cross table header row
-    const crossHeaderRow = document.createElement('tr');
-    crossHeaderRow.className = CROSS_CLASS;
-    const emptyTh = document.createElement('th');
-    emptyTh.colSpan = 2;
-    crossHeaderRow.appendChild(emptyTh);
+    // Add bxv class to rightmost original header column
+    const headerRow = thead.querySelector('tr');
+    if (headerRow) {
+      const lastOriginalHeader = headerRow.lastElementChild;
+      if (lastOriginalHeader) {
+        lastOriginalHeader.classList.add('bxv');
+      }
 
-    teams.forEach((team) => {
-      const th = document.createElement('th');
-      th.className = CROSS_CLASS;
-      th.textContent = team.position;
-      crossHeaderRow.appendChild(th);
-    });
+      // Add cross table headers to existing header row
+      teams.forEach((team) => {
+        const th = document.createElement('th');
+        th.className = CROSS_CLASS;
+        th.textContent = team.position;
+        headerRow.appendChild(th);
+      });
+    }
 
-    thead.appendChild(crossHeaderRow);
-
-    // Add cross table rows
+    // Add cross table cells to existing rows
+    const bodyRows = Array.from(tbody.querySelectorAll('tr'));
     teams.forEach((team, rowIndex) => {
-      const row = document.createElement('tr');
-      row.className = CROSS_CLASS;
+      const row = bodyRows[rowIndex];
+      if (!row) return;
 
-      // Position and name cells
-      const posTd = document.createElement('td');
-      posTd.className = CROSS_CLASS;
-      posTd.textContent = team.position;
-      row.appendChild(posTd);
-
-      const nameTd = document.createElement('td');
-      nameTd.className = CROSS_CLASS;
-      const link = document.createElement('a');
-      link.href = team.href;
-      link.textContent = team.name;
-      nameTd.appendChild(link);
-      row.appendChild(nameTd);
+      // Add bxv class to rightmost original data column
+      const lastOriginalCell = row.lastElementChild;
+      if (lastOriginalCell) {
+        lastOriginalCell.classList.add('bxv');
+      }
 
       // Result cells
       teams.forEach((opponent, colIndex) => {
@@ -354,8 +348,6 @@
         }
         row.appendChild(td);
       });
-
-      tbody.appendChild(row);
     });
 
     applyVisibility(table, false);
