@@ -12,6 +12,13 @@
 (function () {
   'use strict';
 
+  // K factor calculation constants
+  const K_MAX = 80;
+  const T_DIVISOR = 30; // Divisor for youth acceleration
+  const U_SHIFT = 800; // Shift for braking factor
+  const A1_BONUS = 4; // Success bonus for juniors
+  const A2_BONUS = 4; // Success bonus for adults
+
   function isTargetPage() {
     const search = window.location.search;
     return search && search.includes('art=9');
@@ -182,7 +189,54 @@
     return 1 / (1 + Math.pow(10, exponent));
   }
 
-  function calculateNewDWZ(playerDWZ, opponentRatings, opponentResults) {
+  function calculateKFactor(currentDwz, birthYear, index, scoreSum, expectedSum) {
+    // Since chess-results.com doesn't have birth year data, default to adult
+    const isAdult = true;
+    const isYouth = false;
+    const isJunior = false;
+    const isYouthUnder20 = false;
+
+    // Determine K0 based on index, age, and DWZ
+    let k0;
+    const indexValue = index > 10 ? 11 : index;
+
+    if (isAdult && currentDwz < 2000) {
+      // Adults under 2000 DWZ
+      const adultK0 = [60, 60, 44, 42, 40, 38, 36, 34, 32, 30, 28];
+      k0 = adultK0[indexValue - 1];
+    } else {
+      // Adults >=2000 DWZ (default to high K0 table)
+      const highK0 = [60, 60, 41, 39, 37, 35, 33, 31, 29, 27, 25];
+      k0 = highK0[indexValue - 1];
+    }
+
+    // Calculate Erfolgsaufschlag a
+    let a = 0;
+    if (scoreSum >= expectedSum) {
+      if (isYouthUnder20 && currentDwz < 2000) {
+        a = (2000 - currentDwz) / T_DIVISOR;
+      } else if (isJunior && currentDwz < 1600) {
+        a = A1_BONUS;
+      } else if (isAdult && currentDwz < 1600) {
+        a = A2_BONUS;
+      }
+    }
+
+    // Calculate Bremsfaktor b
+    let b = 1;
+    if (scoreSum < expectedSum && currentDwz < 1600) {
+      b = (currentDwz + U_SHIFT) / (1600 + U_SHIFT);
+    }
+
+    // Calculate K
+    let k = (k0 * b) + a;
+    k = Math.round(k * 10) / 10; // Round to 1 decimal
+    k = Math.min(k, K_MAX); // Limit by Kmax
+
+    return k;
+  }
+
+  function calculateNewDWZ(playerDWZ, opponentRatings, opponentResults, index = 1) {
     const validOpponents = opponentRatings
       .map((rating, index) => ({ rating, result: opponentResults[index] }))
       .filter((entry) => entry.rating != null && entry.rating > 0 && entry.result != null);
@@ -195,15 +249,67 @@
     );
     const scoreSum = validOpponents.reduce((sum, opponent) => sum + opponent.result, 0);
 
-    const correctionFactor = 20;
-    const delta = (scoreSum - expectedSum) * correctionFactor;
+    // Calculate K factor based on new formula (default to adult since no birth year data)
+    const k = calculateKFactor(playerDWZ, null, index, scoreSum, expectedSum);
+
+    // New formula: Rn = R0 + K * (W - We)
+    const delta = (scoreSum - expectedSum) * k;
+    let newDwz = playerDWZ + delta;
+
+    // Minimum DWZ is 1100
+    if (newDwz < 1100) newDwz = 1100;
+
     return {
       expectedSum,
       scoreSum,
       delta,
-      newDWZ: playerDWZ + delta,
+      newDWZ: newDwz,
       count: validOpponents.length,
+      k
     };
+  }
+
+  function calculatePerformance(opponentRatings, opponentResults, currentDwz) {
+    const validOpponents = opponentRatings
+      .map((rating, index) => ({ rating, result: opponentResults[index] }))
+      .filter((entry) => entry.rating != null && entry.rating > 0 && entry.result != null);
+
+    // Performance only for established players with at least 5 games
+    if (currentDwz == null || validOpponents.length < 5) return null;
+
+    const scoreSum = validOpponents.reduce((sum, opponent) => sum + opponent.result, 0);
+
+    // If result is 0%, no performance number
+    if (scoreSum === 0) return null;
+
+    // If result is 100%, add fictitious draw against opponent average
+    let ratingsForCalc = validOpponents.map(op => op.rating);
+    if (scoreSum === validOpponents.length) {
+      const avgRating = ratingsForCalc.reduce((sum, r) => sum + r, 0) / ratingsForCalc.length;
+      ratingsForCalc.push(avgRating);
+    }
+
+    // Iteration to find Rh where expected score equals actual score
+    const targetScore = scoreSum / ratingsForCalc.length;
+    const clampedTarget = Math.min(0.99, Math.max(0.01, targetScore));
+
+    let low = 100;
+    let high = 3000;
+    for (let i = 0; i < 40; i += 1) {
+      const mid = (low + high) / 2;
+      const expectedAverage =
+        ratingsForCalc.reduce((sum, rating) => sum + calculateExpectedScore(mid, rating), 0) /
+        ratingsForCalc.length;
+
+      if (expectedAverage < clampedTarget) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+
+    const rh = Math.round((low + high) / 2);
+    return rh;
   }
 
   function createPanel() {
@@ -219,7 +325,7 @@
     return panel;
   }
 
-  function renderResult(panel, playerDWZ, opponents, calculation) {
+  function renderResult(panel, playerDWZ, opponents, calculation, performance) {
     panel.innerHTML = '';
     const heading = document.createElement('h3');
     heading.textContent = 'DWZ-Rechner für ausgewählten Spieler';
@@ -239,8 +345,9 @@
       <strong>Auswertung gültiger Gegner:</strong> ${calculation.count}<br>
       <strong>Erzielte Punkte gegen diese Gegner:</strong> ${calculation.scoreSum.toFixed(1)}<br>
       <strong>Erwartete Punkte:</strong> ${calculation.expectedSum.toFixed(2)}<br>
+      <strong>K-Faktor:</strong> ${calculation.k.toFixed(1)}<br>
       <strong>Delta:</strong> ${calculation.delta.toFixed(2)}<br>
-      <strong>Neuer DWZ-Wert (berechnet):</strong> ${calculation.newDWZ.toFixed(0)}
+      <strong>Neuer DWZ-Wert (berechnet):</strong> ${calculation.newDWZ.toFixed(0)}${performance !== null ? `<br><strong>Turnierleistung (Leistung):</strong> ${performance}` : ''}
     `;
     panel.appendChild(summary);
 
@@ -279,7 +386,7 @@
     note.style.fontSize = '0.95rem';
     note.style.color = '#444';
     note.style.marginTop = '10px';
-    note.textContent = 'Gegner ohne gültige DWZ werden übersprungen. Die Berechnung verwendet das in der DWZ-Praxis übliche Erwartungswert-Modell mit einem Korrekturfaktor von 20.';
+    note.textContent = 'Gegner ohne gültige DWZ werden übersprungen. Die Berechnung verwendet das neue DWZ-Wertungssystem 2026 mit K-Faktor basierend auf Alter und Index. Leistung wird nur bei mindestens 5 Partien berechnet.';
     panel.appendChild(note);
   }
 
@@ -326,15 +433,24 @@
     const calculation = calculateNewDWZ(
       playerDWZ,
       opponentsWithDWZ.map((opp) => opp.dwz),
-      opponentsWithDWZ.map((opp) => opp.result)
+      opponentsWithDWZ.map((opp) => opp.result),
+      1 // Default index to 1 since we don't have row index info
     );
     console.info('[DWZCalc] calculation result', calculation);
+
+    // Calculate performance (Leistung)
+    const performance = calculatePerformance(
+      opponentsWithDWZ.map((opp) => opp.dwz),
+      opponentsWithDWZ.map((opp) => opp.result),
+      playerDWZ
+    );
+    console.info('[DWZCalc] performance result', performance);
 
     if (!calculation) {
       console.warn('[DWZCalc] calculation could not be completed', { playerDWZ, opponentsWithDWZ });
     }
 
-    renderResult(panel, playerDWZ, opponentsWithDWZ, calculation || { expectedSum: 0, scoreSum: 0, delta: 0, newDWZ: playerDWZ, count: 0 });
+    renderResult(panel, playerDWZ, opponentsWithDWZ, calculation || { expectedSum: 0, scoreSum: 0, delta: 0, newDWZ: playerDWZ, count: 0, k: 20 }, performance);
   }
 
   function addControl() {
