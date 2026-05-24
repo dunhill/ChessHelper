@@ -227,9 +227,8 @@
       const taCell = row.querySelector('td.ta');
       const tmCell = row.querySelector('td.tm');
       const resultText = normalizeName(tmCell?.textContent || '');
-      const resultMatch = resultText.match(/(.+?)\s*:\s*(.+)/);
 
-      if (!thCell || !taCell || !resultMatch) {
+      if (!thCell || !taCell) {
         console.error(`${LOG_PREFIX} DEM row has invalid structure`, {
           team: team.name,
           index,
@@ -250,15 +249,34 @@
         continue;
       }
 
-      const homePoints = parseDemSidePoints(resultMatch[1]);
-      const awayPoints = parseDemSidePoints(resultMatch[2]);
-      if (homePoints == null || awayPoints == null) {
-        console.error(`${LOG_PREFIX} DEM row points could not be parsed`, {
-          team: team.name,
-          index,
-          resultText
-        });
-        continue;
+      // Check if the result indicates a pending game ("?" or "LIVE")
+      const isPendingGame = resultText === '?' || resultText === 'LIVE';
+
+      let homePoints, awayPoints;
+      if (isPendingGame) {
+        homePoints = '?';
+        awayPoints = '?';
+      } else {
+        const resultMatch = resultText.match(/(.+?)\s*:\s*(.+)/);
+        if (!resultMatch) {
+          console.error(`${LOG_PREFIX} DEM row has invalid structure`, {
+            team: team.name,
+            index,
+            resultText
+          });
+          continue;
+        }
+
+        homePoints = parseDemSidePoints(resultMatch[1]);
+        awayPoints = parseDemSidePoints(resultMatch[2]);
+        if (homePoints == null || awayPoints == null) {
+          console.error(`${LOG_PREFIX} DEM row points could not be parsed`, {
+            team: team.name,
+            index,
+            resultText
+          });
+          continue;
+        }
       }
 
       const homeIndex = teamNameToIndex.get(canonicalizeName(homeName));
