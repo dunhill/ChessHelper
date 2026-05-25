@@ -413,10 +413,10 @@
         if (resultText === 'LIVE' || resultText === '?') {
           pointsEarned = '?';
         } else {
-          const resultMatch = resultText.match(/(\d+)\s*:\s*(\d+)/);
+          const resultMatch = resultText.match(/([½\d+-]+)\s*:\s*([½\d+-]+)/);
           if (resultMatch) {
-            const homePoints = parseFloat(resultMatch[1]);
-            const awayPoints = parseFloat(resultMatch[2]);
+            const homePoints = parsePoints(resultMatch[1]);
+            const awayPoints = parsePoints(resultMatch[2]);
             pointsEarned = isPlayerWhite ? homePoints : awayPoints;
           }
         }
