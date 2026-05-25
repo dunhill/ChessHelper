@@ -18,11 +18,19 @@
         const h1 = document.querySelector('main h1');
         if (!h1) return null;
         
-        // Get text before the br element
+        // Get text before the br element, skipping abbr elements (chess titles)
         const br = h1.querySelector('br');
         if (br) {
-            const textBeforeBr = h1.childNodes[0].textContent.trim();
-            return textBeforeBr;
+            // Get all child nodes before the br
+            const textParts = [];
+            for (let node = h1.firstChild; node && node !== br; node = node.nextSibling) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    textParts.push(node.textContent);
+                } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'ABBR') {
+                    textParts.push(node.textContent);
+                }
+            }
+            return textParts.join('').trim();
         }
         
         // Fallback: split by br if br exists in innerHTML
@@ -30,6 +38,9 @@
         if (parts.length > 0) {
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = parts[0];
+            // Remove abbr elements
+            const abbrElements = tempDiv.querySelectorAll('abbr');
+            abbrElements.forEach(abbr => abbr.remove());
             return tempDiv.textContent.trim();
         }
         
@@ -330,6 +341,24 @@
 
         console.log(`Searching for ${playerName} from ${startYear} to ${currentYear}`);
 
+        // Insert heading and loading spinner immediately
+        const main = document.querySelector('main');
+        if (!main) return;
+
+        const heading = document.createElement('h2');
+        heading.textContent = 'Historical Data';
+        heading.style.marginTop = '30px';
+        main.parentNode.insertBefore(heading, main.nextSibling);
+
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'dsj-history-loading';
+        loadingDiv.style.marginTop = '20px';
+        loadingDiv.style.padding = '20px';
+        loadingDiv.style.textAlign = 'center';
+        loadingDiv.style.color = '#666';
+        loadingDiv.innerHTML = '<p>Loading historical data...</p>';
+        main.parentNode.insertBefore(loadingDiv, heading.nextSibling);
+
         const playerDataList = [];
 
         // Search for player in each year
@@ -349,33 +378,34 @@
             }
         }
 
+        // Remove loading spinner
+        loadingDiv.remove();
+
         if (playerDataList.length === 0) {
             console.log('No historical data found');
+            const noDataDiv = document.createElement('div');
+            noDataDiv.style.marginTop = '20px';
+            noDataDiv.style.padding = '20px';
+            noDataDiv.style.textAlign = 'center';
+            noDataDiv.style.color = '#666';
+            noDataDiv.textContent = 'No historical data found for this player.';
+            main.parentNode.insertBefore(noDataDiv, heading.nextSibling);
             return;
         }
 
         // Create and insert the table
         const table = createHistoryTable(playerDataList);
+        main.parentNode.insertBefore(table, heading.nextSibling);
         
-        // Insert below the main element
-        const main = document.querySelector('main');
-        if (main) {
-            const heading = document.createElement('h2');
-            heading.textContent = 'Historical Data';
-            heading.style.marginTop = '30px';
-            main.parentNode.insertBefore(heading, main.nextSibling);
-            main.parentNode.insertBefore(table, heading.nextSibling);
-            
-            // Initialize magnific-popup on the new photos if the library is available
-            if (typeof $ !== 'undefined' && $.magnificPopup) {
-                $('.js-gallery').magnificPopup({
-                    delegate: 'a.js-img',
-                    type: 'image',
-                    gallery: {
-                        enabled: true
-                    }
-                });
-            }
+        // Initialize magnific-popup on the new photos if the library is available
+        if (typeof $ !== 'undefined' && $.magnificPopup) {
+            $('.js-gallery').magnificPopup({
+                delegate: 'a.js-img',
+                type: 'image',
+                gallery: {
+                    enabled: true
+                }
+            });
         }
     }
 
