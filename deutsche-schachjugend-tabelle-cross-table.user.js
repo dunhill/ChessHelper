@@ -16,7 +16,7 @@
 
   function isTargetPage() {
     if (!window.location.href.startsWith('https://www.deutsche-schachjugend.de')) return false;
-    return /\/tabelle(?:\/[^/?#]+)?\/?$/.test(window.location.pathname);
+    return /\/tabelle(?:\/[^/?#]+)?\/?$/.test(window.location.pathname) || /\/lv\/[^/?#]+\/?$/.test(window.location.pathname);
   }
 
   function normalizeName(name) {
@@ -320,6 +320,180 @@
     } catch (error) {
       console.error(`${LOG_PREFIX} Error fetching team results`, { team: team.name, error });
     }
+  }
+
+  function parseLvTable(lvTable) {
+    const tbodyBlocks = [];
+    const tbodies = lvTable.querySelectorAll('tbody');
+    
+    tbodies.forEach(tbody => {
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      if (rows.length === 0) return;
+      
+      // First row is the header
+      const headerRow = rows[0];
+      const dataRows = rows.slice(1);
+      
+      const players = [];
+      dataRows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 4) return;
+        
+        // 4th column (index 3) is the Spieler column with the link
+        const playerCell = cells[3];
+        const playerLink = playerCell.querySelector('a');
+        if (!playerLink) return;
+        
+        const playerName = normalizeName(playerLink.textContent);
+        const playerHref = new URL(playerLink.getAttribute('href'), window.location.href).toString();
+        
+        players.push({ row, playerName, playerHref });
+      });
+      
+      if (players.length > 0) {
+        tbodyBlocks.push({ tbody, headerRow, players });
+      }
+    });
+    
+    return tbodyBlocks;
+  }
+
+  async function fetchSpielerRounds(playerHref, playerName) {
+    try {
+      const response = await fetch(playerHref);
+      if (!response.ok) {
+        console.error(`${LOG_PREFIX} Failed to fetch spieler page`, { playerName, status: response.status });
+        return [];
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const spielerTable = doc.querySelector('table.spieler');
+      if (!spielerTable) {
+        console.error(`${LOG_PREFIX} No spieler table found on player page`, { playerName });
+        return [];
+      }
+
+      const rows = Array.from(spielerTable.querySelectorAll('tbody tr'));
+      const rounds = [];
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 7) return;
+
+        // Round number (column 0)
+        const roundCell = cells[0];
+        const roundLink = roundCell.querySelector('a');
+        const roundText = normalizeName(roundLink ? roundLink.textContent : roundCell.textContent);
+        const roundMatch = roundText.match(/(\d+)/);
+        const roundNumber = roundMatch ? parseInt(roundMatch[1]) : null;
+
+        // Result (column 4 - tm)
+        const resultCell = cells[4];
+        const resultLink = resultCell.querySelector('a');
+        const resultText = normalizeName(resultLink ? resultLink.textContent : resultCell.textContent);
+
+        // Check if the player is white (column 3 - th) or black (column 5 - ta)
+        const whiteCell = cells[3];
+        const blackCell = cells[5];
+        const whiteName = extractNameFromCell(whiteCell);
+        const blackName = extractNameFromCell(blackCell);
+
+        // Determine if the player is white or black
+        const isPlayerWhite = canonicalizeName(whiteName) === canonicalizeName(playerName);
+        const opponentName = isPlayerWhite ? blackName : whiteName;
+        
+        // Opponent DWZ (column 6 for black, column 2 for white)
+        const opponentDwzCell = isPlayerWhite ? cells[6] : cells[2];
+        const opponentDwz = normalizeName(opponentDwzCell.textContent).replace(/[^\d]/g, '');
+
+        // Parse points earned
+        let pointsEarned;
+        if (resultText === 'LIVE' || resultText === '?') {
+          pointsEarned = '?';
+        } else {
+          const resultMatch = resultText.match(/(\d+)\s*:\s*(\d+)/);
+          if (resultMatch) {
+            const homePoints = parseFloat(resultMatch[1]);
+            const awayPoints = parseFloat(resultMatch[2]);
+            pointsEarned = isPlayerWhite ? homePoints : awayPoints;
+          }
+        }
+
+        if (roundNumber !== null && pointsEarned !== undefined) {
+          rounds.push({
+            roundNumber,
+            pointsEarned,
+            opponentName,
+            opponentDwz
+          });
+        }
+      });
+
+      // Sort rounds in descending order by round number
+      rounds.sort((a, b) => b.roundNumber - a.roundNumber);
+
+      return rounds;
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error fetching spieler rounds`, { playerName, error });
+      return [];
+    }
+  }
+
+  function renderLvRoundColumns(tbodyBlocks) {
+    tbodyBlocks.forEach(block => {
+      const { tbody, headerRow, players } = block;
+      
+      // Fetch rounds for all players to determine the round numbers
+      const allRoundsPromises = players.map(player => 
+        fetchSpielerRounds(player.playerHref, player.playerName)
+      );
+      
+      Promise.all(allRoundsPromises).then(allRounds => {
+        // Get unique round numbers from all players, sorted in descending order
+        const roundNumbers = new Set();
+        allRounds.forEach(rounds => {
+          rounds.forEach(round => roundNumbers.add(round.roundNumber));
+        });
+        const sortedRoundNumbers = Array.from(roundNumbers).sort((a, b) => b - a);
+        
+        if (sortedRoundNumbers.length === 0) return;
+        
+        // Add headers for each round to the header row
+        sortedRoundNumbers.forEach(roundNumber => {
+          const th = document.createElement('th');
+          th.textContent = `${roundNumber}. Runde`;
+          th.className = 'dsj-lv-round-header';
+          headerRow.appendChild(th);
+        });
+        
+        // Add round data to each player row
+        players.forEach((player, playerIndex) => {
+          const rounds = allRounds[playerIndex];
+          const roundMap = new Map();
+          rounds.forEach(round => {
+            roundMap.set(round.roundNumber, round);
+          });
+          
+          sortedRoundNumbers.forEach(roundNumber => {
+            const td = document.createElement('td');
+            td.className = 'dsj-lv-round-cell';
+            
+            const round = roundMap.get(roundNumber);
+            if (round) {
+              const pointsText = round.pointsEarned === '?' ? '?' : formatPoints(round.pointsEarned);
+              const dwzText = round.opponentDwz ? ` (${round.opponentDwz})` : '';
+              td.textContent = `${pointsText} ${round.opponentName}${dwzText}`;
+            } else {
+              td.textContent = '';
+            }
+            
+            player.row.appendChild(td);
+          });
+        });
+      });
+    });
   }
 
   function renderCrossTable(table, teams, matrix) {
@@ -755,6 +929,18 @@
     const mainHeading = document.querySelector('main h1');
     if (!mainHeading) {
       console.error(`${LOG_PREFIX} Could not find main h1 for toggle placement.`);
+      return;
+    }
+
+    // Check if this is an LV page
+    const isLvPage = table.classList.contains('lv');
+    if (isLvPage) {
+      console.info(`${LOG_PREFIX} Processing LV page`);
+      relaxTableLayout(resultsContainer, table);
+      const tbodyBlocks = parseLvTable(table);
+      if (tbodyBlocks.length > 0) {
+        renderLvRoundColumns(tbodyBlocks);
+      }
       return;
     }
 
