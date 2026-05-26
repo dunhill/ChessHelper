@@ -201,7 +201,7 @@
         const topPlayersInput = document.createElement('input');
         topPlayersInput.type = 'number';
         topPlayersInput.id = 'top-players-input';
-        topPlayersInput.value = '5';
+        topPlayersInput.value = '0';
         topPlayersInput.min = '0';
         topPlayersInput.max = '50';
         topPlayersInput.style.width = '60px';
@@ -281,53 +281,73 @@
         return new Promise((resolve) => {
             const urlTournament = tournamentNameToUrl(tournamentName);
             const url = `https://www.deutsche-schachjugend.de/${year}/${urlTournament}/spieler/`;
-            console.log(`Fetching player data from URL: ${url} for tournament: ${tournamentName}, year: ${year}`);
+            console.log(`Fetching ${tournamentName} ${year} from ${url}`);
             GM_xmlhttpRequest({
                 method: 'GET',
                 url: url,
                 timeout: 30000,
                 onload: function(response) {
-                    console.log(`Response status: ${response.status} for ${url}`);
-                    console.log(`Full response content:\n${response.responseText}`);
                     if (response.status === 200) {
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(response.responseText, 'text/html');
                         const tbody = doc.querySelector('#spieler');
                         if (tbody) {
-                            const players = [];
                             const rows = tbody.querySelectorAll('tr');
-                            rows.forEach(row => {
+                            
+                            // Find DWZ and ELO column indices from header row
+                            let dwzIndex = -1;
+                            let eloIndex = -1;
+                            const table = tbody.closest('table');
+                            const thead = table ? table.querySelector('thead') : null;
+                            const headerRow = thead ? thead.querySelector('tr') : null;
+                            if (headerRow) {
+                                const headerCells = headerRow.querySelectorAll('th');
+                                headerCells.forEach((th, index) => {
+                                    const abbr = th.querySelector('abbr');
+                                    const text = abbr ? abbr.textContent.trim().toLowerCase() : th.textContent.trim().toLowerCase();
+                                    if (text.includes('dwz')) {
+                                        dwzIndex = index;
+                                    }
+                                    if (text.includes('elo')) {
+                                        eloIndex = index;
+                                    }
+                                });
+                            }
+                            
+                            if (dwzIndex === -1 || eloIndex === -1) {
+                                console.log(`${tournamentName} ${year}: Could not find DWZ or ELO columns`);
+                                resolve([]);
+                                return;
+                            }
+                            
+                            const players = [];
+                            rows.forEach((row) => {
                                 const cells = row.querySelectorAll('td');
-                                if (cells.length >= 7) {
-                                    const dwz = cells[5] ? parseFloat(cells[5].textContent.trim()) || 0 : 0;
-                                    const elo = cells[6] ? parseFloat(cells[6].textContent.trim()) || 0 : 0;
+                                if (cells.length > Math.max(dwzIndex, eloIndex)) {
+                                    const dwz = cells[dwzIndex] ? parseFloat(cells[dwzIndex].textContent.trim()) || 0 : 0;
+                                    const elo = cells[eloIndex] ? parseFloat(cells[eloIndex].textContent.trim()) || 0 : 0;
                                     if (dwz > 0 || elo > 0) {
                                         players.push({ dwz, elo });
                                     }
                                 }
                             });
-                            console.log(`Fetched ${players.length} players from ${url}:`, players);
+                            console.log(`${tournamentName} ${year}: Fetched ${players.length} players`);
                             resolve(players);
                         } else {
-                            console.log(`No player table found at ${url}`);
+                            console.log(`${tournamentName} ${year}: No player table found`);
                             resolve([]);
                         }
                     } else {
-                        console.log(`Failed to fetch ${url}, status: ${response.status}`);
+                        console.log(`${tournamentName} ${year}: Failed to fetch (status ${response.status})`);
                         resolve([]);
                     }
                 },
                 onerror: function(response) {
-                    console.log(`Error fetching ${url} - page did not open or request failed`);
-                    if (response && response.responseText) {
-                        console.log(`Full response content:\n${response.responseText}`);
-                    } else {
-                        console.log(`No response content available - page may not exist or network error occurred`);
-                    }
+                    console.log(`${tournamentName} ${year}: Error fetching - page did not open`);
                     resolve([]);
                 },
                 ontimeout: function() {
-                    console.log(`Timeout fetching ${url} - page did not respond within 30 seconds`);
+                    console.log(`${tournamentName} ${year}: Timeout`);
                     resolve([]);
                 }
             });
@@ -342,17 +362,13 @@
         // Take first N players from the list
         const topPlayers = players.slice(0, Math.min(topN, players.length));
 
-        console.log(`Calculating average of ${topPlayers.length} players (original order) for param: ${param}`, topPlayers);
-
         // Calculate average
         const sum = topPlayers.reduce((acc, player) => {
             return acc + (param === 'dwz' ? player.dwz : player.elo);
         }, 0);
 
         const avg = sum / topPlayers.length;
-        const roundedAvg = Math.round(avg);
-        console.log(`Calculated average: ${avg}, rounded to: ${roundedAvg}`);
-        return roundedAvg;
+        return Math.round(avg);
     }
 
     // Update the comparison
@@ -391,22 +407,19 @@
             for (const year in yearsData) {
                 for (const turnierName of turnierSet) {
                     if (yearsData[year][turnierName]) {
-                        console.log(`Processing ${turnierName} for year ${year}`);
-                        console.log(`Original stats:`, yearsData[year][turnierName]);
                         await new Promise(resolve => setTimeout(resolve, 200)); // Add delay between requests
                         const players = await fetchPlayerData(parseInt(year), turnierName);
                         const avg = calculateTopPlayersAverage(players, param, topPlayersN);
                         if (avg !== null) {
-                            console.log(`Calculated average for ${param}: ${avg}`);
                             // Create a modified stats object with the calculated average
                             yearsData[year][turnierName] = {
                                 ...yearsData[year][turnierName],
                                 [param]: avg,
                                 _topPlayersAvg: true
                             };
-                            console.log(`Modified stats:`, yearsData[year][turnierName]);
+                            console.log(`${turnierName} ${year}: Top ${topPlayersN} ${param.toUpperCase()} average = ${avg}`);
                         } else {
-                            console.log(`Average calculation returned null for ${turnierName} year ${year} - removing stats entry`);
+                            console.log(`${turnierName} ${year}: Could not calculate average - removing stats entry`);
                             // Remove the stats entry to show empty cells
                             delete yearsData[year][turnierName];
                         }
@@ -530,7 +543,7 @@
 
         const canvasWrapper = document.createElement('div');
         canvasWrapper.style.position = 'relative';
-        canvasWrapper.style.height = '300px';
+        canvasWrapper.style.height = '500px';
         canvasWrapper.style.width = '100%';
         chartContainer.appendChild(canvasWrapper);
 
