@@ -548,6 +548,133 @@
     h1.insertAdjacentElement('afterend', wrapper);
   }
 
+  async function renderStateListCalculations(table) {
+    removePlayerListCalculations(table);
+
+    const rows = Array.from(table.querySelectorAll('tr'));
+    const headerRows = rows.filter((row) => row.querySelectorAll('th').length >= 4);
+    const dataRows = rows.filter((row) => {
+      const cell = row.children[3];
+      return cell && cell.querySelector('a[href*="/spieler/"]');
+    });
+
+    const createCell = (isHeader, className, text) => {
+      const cell = document.createElement(isHeader ? 'th' : 'td');
+      cell.className = className;
+      cell.textContent = text;
+      return cell;
+    };
+
+    const insertAfterFourth = (row, cell) => {
+      row.insertBefore(cell, row.children[4] || null);
+    };
+
+    headerRows.forEach((row) => {
+      insertAfterFourth(row, createCell(true, PLAYER_LIST_LEISTUNG_HEADER_CLASS, 'Leistung'));
+      insertAfterFourth(row, createCell(true, PLAYER_LIST_DIFF_HEADER_CLASS, 'Diff'));
+      insertAfterFourth(row, createCell(true, PLAYER_LIST_NEW_HEADER_CLASS, 'New'));
+      insertAfterFourth(row, createCell(true, PLAYER_LIST_OLD_DWZ_HEADER_CLASS, 'DWZ'));
+    });
+
+    const placeholders = dataRows.map((row) => {
+      const leistungCell = createCell(false, PLAYER_LIST_LEISTUNG_CELL_CLASS, '...');
+      const diffCell = createCell(false, PLAYER_LIST_DIFF_CELL_CLASS, '...');
+      const newCell = createCell(false, PLAYER_LIST_NEW_CELL_CLASS, '...');
+      const oldDwzCell = createCell(false, PLAYER_LIST_OLD_DWZ_CELL_CLASS, '');
+      insertAfterFourth(row, leistungCell);
+      insertAfterFourth(row, diffCell);
+      insertAfterFourth(row, newCell);
+      insertAfterFourth(row, oldDwzCell);
+      return { oldDwzCell, newCell, diffCell, leistungCell };
+    });
+
+    const playerLinks = dataRows.map((row) => {
+      const anchor = row.children[3].querySelector('a[href*="/spieler/"]');
+      return anchor ? new URL(anchor.getAttribute('href'), window.location.href).toString() : null;
+    });
+
+    try {
+      const results = await Promise.all(playerLinks.map((href) => (href ? fetchPlayerPageCalculations(href) : Promise.resolve(null))));
+      results.forEach((result, index) => {
+        const placeholder = placeholders[index];
+        if (!placeholder) return;
+
+        if (!result || !result.calc) {
+          placeholder.oldDwzCell.textContent = result?.playerDwz != null ? `${result.playerDwz}` : '';
+          placeholder.newCell.textContent = '';
+          placeholder.diffCell.textContent = '';
+          placeholder.leistungCell.textContent = '';
+          return;
+        }
+
+        placeholder.oldDwzCell.textContent = result.playerDwz != null ? `${result.playerDwz}` : '';
+        placeholder.newCell.textContent = `${result.calc.newDwz}`;
+        placeholder.newCell.title = result.playerDwz == null
+          ? `Erste DWZ geschätzt: ${result.calc.newDwz}`
+          : `Neue DWZ: ${result.calc.newDwz}`;
+
+        let diffText = '';
+        let diffColor = 'black';
+        if (result.playerDwz == null) {
+          diffText = 'neu';
+        } else {
+          const delta = result.calc.newDwz - result.playerDwz;
+          diffText = `${delta >= 0 ? '+' : ''}${delta}`;
+          diffColor = delta > 0 ? 'green' : delta < 0 ? 'red' : 'black';
+          placeholder.diffCell.title = `Δ ${diffText}`;
+        }
+        placeholder.diffCell.textContent = diffText;
+        placeholder.diffCell.style.color = diffColor;
+
+        placeholder.leistungCell.textContent = result.performance != null ? result.performance : '';
+        if (result.performance != null) {
+          placeholder.leistungCell.title = `Leistung: ${result.performance}`;
+        }
+      });
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error rendering state list calculations`, { error });
+    }
+  }
+
+  function renderStateListToggle(table) {
+    const h1 = document.querySelector('main.text h1') || document.querySelector('#content h1') || document.querySelector('h1');
+    if (!h1) return;
+    if (h1.parentNode.querySelector('.dsj-playerlist-toggle')) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'dsj-playerlist-toggle';
+    wrapper.style.margin = '0.5em 0';
+    wrapper.style.fontSize = '0.9em';
+    wrapper.style.fontWeight = 'normal';
+
+    const link = document.createElement('a');
+    link.href = '#';
+    link.textContent = 'new DWZ + Leistung';
+    link.style.fontWeight = 'normal';
+
+    let enabled = false;
+    link.addEventListener('click', async (event) => {
+      event.preventDefault();
+      enabled = !enabled;
+      if (enabled) {
+        link.textContent = 'new DWZ + Leistung (loading...)';
+        await renderStateListCalculations(table);
+        link.textContent = 'new DWZ + Leistung';
+        link.style.fontWeight = 'bold';
+      } else {
+        removePlayerListCalculations(table);
+        link.style.fontWeight = 'normal';
+      }
+    });
+
+    wrapper.appendChild(link);
+    h1.insertAdjacentElement('afterend', wrapper);
+  }
+
+  function isStatePage() {
+    return window.location.href.includes('/dem/lv/') || document.querySelector('table.lv') !== null;
+  }
+
   function isTablePage() {
     return window.location.href.includes('/tabelle/') || document.querySelector('div.results table td.person a') !== null;
   }
@@ -1211,6 +1338,15 @@
       console.info(`${LOG_PREFIX} entering renderIndividualTournamentToggle`);
       renderIndividualTournamentToggle(container, table, playerDwz, birthYear, playerName);
       return;
+    }
+
+    if (isStatePage()) {
+      console.info(`${LOG_PREFIX} isStatePage passed`);
+      const stateTable = document.querySelector('table.lv');
+      if (stateTable) {
+        renderStateListToggle(stateTable);
+        return;
+      }
     }
 
     if (isTablePage()) {
