@@ -608,7 +608,381 @@
     refreshActiveLink();
   }
 
+  function isIndividualTournamentPage() {
+    const url = window.location.href;
+    return url.includes('dem') && url.includes('spieler');
+  }
+
+  function extractPlayerDwzFromCard() {
+    const playercard = document.querySelector('div.playercard table');
+    if (!playercard) return null;
+
+    const rows = Array.from(playercard.querySelectorAll('tr'));
+    for (const row of rows) {
+      const th = row.querySelector('th');
+      const td = row.querySelector('td');
+      if (!th || !td) continue;
+
+      const label = th.textContent.trim();
+      if (label === 'Wertung:') {
+        const text = td.textContent;
+        const match = text.match(/DWZ:\s*(\d+)/);
+        return match ? Number(match[1]) : null;
+      }
+    }
+    return null;
+  }
+
+  function extractPlayerBirthYear() {
+    const playercard = document.querySelector('div.playercard table');
+    if (!playercard) return null;
+
+    const rows = Array.from(playercard.querySelectorAll('tr'));
+    for (const row of rows) {
+      const th = row.querySelector('th');
+      const td = row.querySelector('td');
+      if (!th || !td) continue;
+
+      const label = th.textContent.trim();
+      if (label === 'Jahrgang:') {
+        const year = parseInt(td.textContent.trim());
+        return Number.isFinite(year) ? year : null;
+      }
+    }
+    return null;
+  }
+
+  function extractPlayerName() {
+    // Prefer breadcrumb strong (reliable on example pages)
+    const crumb = document.querySelector('#breadcrumbs strong');
+    if (crumb && crumb.textContent.trim()) return crumb.textContent.trim();
+
+    const h1 = document.querySelector('h1');
+    if (!h1) return null;
+
+    // Prefer a text node that looks like a personal name (two words)
+    for (const node of h1.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent.trim();
+        if (t && /[A-Za-zÄÖÜäöüß]+\s+[A-Za-zÄÖÜäöüß]+/.test(t)) return t;
+      }
+    }
+
+    // If no clear name, remove known event link text (like 'DEM') from h1
+    const anchor = h1.querySelector('a');
+    let full = h1.textContent.trim();
+    if (anchor) {
+      const anchorText = anchor.textContent || '';
+      full = full.replace(anchorText, '');
+    }
+    // Remove epilog such as 'in City'
+    const em = h1.querySelector('em');
+    if (em) {
+      full = full.replace(em.textContent, '');
+    }
+
+    // Take the first non-empty line/segment
+    const parts = full.split(/\n|<br>|\r/).map(s => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      // Prefer the longest segment (likely the name)
+      parts.sort((a,b) => b.length - a.length);
+      return parts[0];
+    }
+
+    return full || null;
+  }
+
+  function collectIndividualTournamentGames(table, playerName) {
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    const games = [];
+
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('td'));
+      if (cells.length < 7) continue;
+
+      // Columns: 0=Runde, 1=Brett, 2=DWZ(white), 3=Weiß, 4=Ergebnis, 5=Schwarz, 6=DWZ(black)
+      const whiteCell = cells[3];
+      const blackCell = cells[5];
+      const resultCell = cells[4];
+      const whiteDwzCell = cells[2];
+      const blackDwzCell = cells[6];
+
+      const whiteName = normalizeName(whiteCell.textContent);
+      const blackName = normalizeName(blackCell.textContent);
+
+      // Determine if player is white or black
+      const isPlayerWhite = canonicalizeName(whiteName) === canonicalizeName(playerName);
+      const isPlayerBlack = canonicalizeName(blackName) === canonicalizeName(playerName);
+
+      console.info(`${LOG_PREFIX} Parsed row players`, { whiteName, blackName, isPlayerWhite, isPlayerBlack });
+
+      if (!isPlayerWhite && !isPlayerBlack) continue;
+
+      // Extract opponent DWZ
+      const opponentDwzText = isPlayerWhite ? blackDwzCell.textContent : whiteDwzCell.textContent;
+      const opponentDwz = parseCurrentDwz(opponentDwzText);
+
+      // Parse result
+      const resultLink = resultCell.querySelector('a');
+      const resultText = (resultLink ? resultLink.textContent : resultCell.textContent).trim();
+      let resultValue;
+
+      if (resultText === 'LIVE' || resultText === '?') {
+        resultValue = null; // Pending game
+      } else {
+        const resultMatch = resultText.match(/([½\d+-]+)\s*:\s*([½\d+-]+)/);
+        if (resultMatch) {
+          const homePoints = parseResultValue(resultMatch[1]);
+          const awayPoints = parseResultValue(resultMatch[2]);
+          resultValue = isPlayerWhite ? homePoints : awayPoints;
+        }
+      }
+
+      games.push({
+        row,
+        opponentDwz,
+        resultValue,
+        isPlayerWhite
+      });
+      console.info(`${LOG_PREFIX} Collected game`, { opponentDwz, resultValue, isPlayerWhite });
+    }
+
+    console.info(`${LOG_PREFIX} Total games collected for player`, { playerName, count: games.length });
+    return games;
+  }
+
+  function normalizeName(name) {
+    return (name || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function canonicalizeName(name) {
+    return normalizeName(name)
+      .normalize('NFKC')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/[‐‑‒–—―]/g, '-')
+      .toLowerCase()
+      .trim();
+  }
+
+  function renderIndividualTournamentToggle(container, table, playerDwz, birthYear, playerName) {
+    // Place toggle as a new line after the player name header, not the banner header
+    const h1 = document.querySelector('main.text h1') || document.querySelector('#content h1') || document.querySelector('h1');
+    console.info(`${LOG_PREFIX} renderIndividualTournamentToggle called`, { playerDwz, birthYear, playerName, hasH1: !!h1, h1Selector: h1 ? h1.outerHTML.slice(0, 200) : null, tableExists: !!table, containerExists: !!container });
+    if (!h1) {
+      console.warn(`${LOG_PREFIX} No <h1> found; cannot place toggle`);
+      return;
+    }
+    // Avoid duplicate
+    if (h1.parentNode.querySelector('.dsj-individual-toggle')) {
+      console.info(`${LOG_PREFIX} dsj-individual-toggle already exists`);
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'dsj-individual-toggle';
+    wrapper.style.margin = '0.5em 0';
+    wrapper.style.fontSize = '0.9em';
+    wrapper.style.fontWeight = 'normal';
+
+    const link = document.createElement('a');
+    link.href = '#';
+    link.textContent = 'new DWZ + Leistung';
+    link.style.fontWeight = 'normal';
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const isEnabled = link.style.fontWeight === 'bold';
+      console.info(`${LOG_PREFIX} Toggle clicked`, { playerName, currentlyEnabled: isEnabled });
+      if (isEnabled) {
+        console.info(`${LOG_PREFIX} Disabling individual tournament calculations`);
+        removeIndividualTournamentCalculations(table);
+        link.style.fontWeight = 'normal';
+      } else {
+        console.info(`${LOG_PREFIX} Enabling individual tournament calculations`);
+        renderIndividualTournamentCalculations(table, playerDwz, birthYear, playerName);
+        link.style.fontWeight = 'bold';
+      }
+    });
+
+    wrapper.appendChild(link);
+    h1.insertAdjacentElement('afterend', wrapper);
+  }
+
+  function renderIndividualTournamentCalculations(table, playerDwz, birthYear, playerName) {
+    removeIndividualTournamentCalculations(table);
+
+    console.info(`${LOG_PREFIX} renderIndividualTournamentCalculations start`, { playerName, playerDwz, birthYear });
+    const games = collectIndividualTournamentGames(table, playerName);
+    console.info(`${LOG_PREFIX} Collected games from table`, { count: games.length });
+    const opponentRatings = [];
+    const opponentResults = [];
+    const gameDetails = [];
+
+    for (const game of games) {
+      console.info(`${LOG_PREFIX} Processing game row`, { opponentDwz: game.opponentDwz, resultValue: game.resultValue, isPlayerWhite: game.isPlayerWhite });
+      if (game.opponentDwz != null && game.resultValue != null) {
+        opponentRatings.push(game.opponentDwz);
+        opponentResults.push(game.resultValue);
+        gameDetails.push(game);
+      } else {
+        console.info(`${LOG_PREFIX} Skipping game for calculation due to missing opponentDWZ or result`, { game });
+      }
+    }
+    console.info(`${LOG_PREFIX} opponentRatings`, { opponentRatings });
+    console.info(`${LOG_PREFIX} opponentResults`, { opponentResults });
+
+    // Calculate new DWZ
+    let calc;
+    if (playerDwz == null) {
+      calc = calculateInitialDwz(opponentRatings, opponentResults);
+    } else {
+      calc = calculateNewDWZ(playerDwz, opponentRatings, opponentResults, birthYear, 1);
+    }
+
+    // Calculate performance
+    const performance = calculatePerformance(opponentRatings, opponentResults, playerDwz);
+    console.info(`${LOG_PREFIX} Calculation outputs`, { calc, performance });
+
+    // Insert new row under playercard 'Wertung:' with new DWZ and Leistung
+    const playercard = document.querySelector('div.playercard table');
+    if (playercard) {
+      const rows = Array.from(playercard.querySelectorAll('tr'));
+      let wertungRow = null;
+      for (const row of rows) {
+        const th = row.querySelector('th');
+        if (th && th.textContent.trim() === 'Wertung:') {
+          wertungRow = row;
+          break;
+        }
+      }
+
+      if (wertungRow) {
+        const newRow = document.createElement('tr');
+        newRow.className = 'dsj-new-wertung-row';
+        const th = document.createElement('th');
+        th.textContent = 'New:';
+        const td = document.createElement('td');
+
+        if (calc) {
+          if (playerDwz == null) {
+            td.textContent = `DWZ: ${calc.newDwz} (neu)`;
+          } else {
+            const delta = calc.newDwz - playerDwz;
+            const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
+            td.innerHTML = `DWZ: ${calc.newDwz} <span style="color:${delta > 0 ? 'green' : (delta < 0 ? 'red' : 'black')}">(${deltaText})</span>`;
+          }
+        }
+        if (performance != null) {
+          td.innerHTML += `, Leistung: ${performance}`;
+        }
+        if (calc) {
+          const parts = [];
+          parts.push(`Erwartet: ${calc.expectedSum.toFixed(2)}`);
+          parts.push(`Erzielt: ${calc.scoreSum.toFixed(2)}`);
+          td.innerHTML += `<br>${parts.join(', ')}`;
+        }
+
+
+
+        newRow.appendChild(th);
+        newRow.appendChild(td);
+        wertungRow.parentNode.insertBefore(newRow, wertungRow.nextSibling);
+      }
+    }
+
+    // Add expected scores inline in Ergebnis column next to visible result
+    const ratingForExpectation = playerDwz != null ? playerDwz : (calc ? calc.newDwz : null);
+    if (ratingForExpectation) {
+      games.forEach(game => {
+        if (game.opponentDwz != null && game.resultValue != null) {
+          const expected = calculateExpectedScore(ratingForExpectation, game.opponentDwz).toFixed(2);
+          const resultCell = game.row.querySelector('td.tm');
+          if (resultCell) {
+            // Append a small span with expected points (remove existing if any)
+            const existing = resultCell.querySelector('.dsj-expected');
+            if (existing) existing.remove();
+            const span = document.createElement('span');
+            span.className = 'dsj-expected';
+            span.style.marginLeft = '0.3em';
+            span.style.fontSize = '0.85em';
+            span.style.color = '#666';
+            span.textContent = `(${expected})`;
+            resultCell.appendChild(span);
+
+            // Also set title on link if present
+            const link = resultCell.querySelector('a');
+            if (link) {
+              const currentTitle = link.getAttribute('title') || '';
+              link.setAttribute('title', `${currentTitle} · Erwartet ${expected}`.trim());
+            }
+          }
+        }
+      });
+    }
+  }
+
+  function removeIndividualTournamentCalculations(table) {
+    // Remove inserted New Wertung row
+    const card = document.querySelector('div.playercard table');
+    if (card) {
+      const newRow = card.querySelector('tr.dsj-new-wertung-row');
+      if (newRow) {
+        newRow.remove();
+        console.info(`${LOG_PREFIX} Removed New Wertung row`);
+      }
+    }
+
+    // Remove expected spans from Ergebnis column
+    const expectedSpans = table.querySelectorAll('.dsj-expected');
+    if (expectedSpans.length) {
+      expectedSpans.forEach(s => s.remove());
+      console.info(`${LOG_PREFIX} Removed expected spans`, { count: expectedSpans.length });
+    }
+
+    // Remove expected text from game link titles
+    const resultLinks = table.querySelectorAll('td.tm a');
+    let titlesStripped = 0;
+    resultLinks.forEach(link => {
+      const title = link.getAttribute('title');
+      if (title) {
+        const stripped = title.replace(/\s*·\s*Erwartet\s*[0-9]+(?:[.,][0-9]+)?\s*$/i, '').trim();
+        if (stripped !== title) {
+          link.setAttribute('title', stripped);
+          titlesStripped += 1;
+        }
+      }
+    });
+    if (titlesStripped) console.info(`${LOG_PREFIX} Stripped Erwartet from ${titlesStripped} link titles`);
+  }
+
   function run() {
+    console.info(`${LOG_PREFIX} Script started`, { href: window.location.href });
+
+    // Check if this is an individual tournament player page
+    if (isIndividualTournamentPage()) {
+      console.info(`${LOG_PREFIX} isIndividualTournamentPage passed`);
+      const container = document.querySelector('div.results');
+      const table = container?.querySelector('table.spieler');
+      console.info(`${LOG_PREFIX} Found elements`, { container: !!container, table: !!table });
+      if (!container || !table) {
+        console.info(`${LOG_PREFIX} No individual tournament table found on this page.`);
+        return;
+      }
+
+      const playerDwz = extractPlayerDwzFromCard();
+      const birthYear = extractPlayerBirthYear();
+      const playerName = extractPlayerName();
+      console.info(`${LOG_PREFIX} Extracted player info`, { playerName, playerDwz, birthYear });
+
+      if (!playerName) {
+        console.info(`${LOG_PREFIX} Could not extract player name.`);
+        return;
+      }
+      console.info(`${LOG_PREFIX} entering renderIndividualTournamentToggle`);
+      renderIndividualTournamentToggle(container, table, playerDwz, birthYear, playerName);
+      return;
+    }
+
+    // Original team tournament logic
     const resultsContainers = Array.from(document.querySelectorAll('div.results'));
     if (resultsContainers.length === 0) {
       console.info(`${LOG_PREFIX} No results table found on this page.`);
