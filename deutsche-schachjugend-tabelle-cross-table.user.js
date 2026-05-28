@@ -76,6 +76,19 @@
     return String(Math.trunc(value));
   }
 
+  function formatDelta(val) {
+    if (val == null) return '';
+    if (Math.abs(val) < 1e-9) return '+0';
+    const sign = val > 0 ? '+' : '-';
+    const abs = Math.abs(val);
+    const isHalf = Math.abs(abs % 1 - 0.5) < 1e-9;
+    if (isHalf) {
+      const whole = Math.floor(abs);
+      return `${sign}${whole > 0 ? whole : ''}½`;
+    }
+    return `${sign}${Math.trunc(abs)}`;
+  }
+
   function validatePoints(value, context) {
     if (value === '?') return true;
     if (value == null) {
@@ -89,6 +102,445 @@
       return false;
     }
     return true;
+  }
+
+  function parseCurrentRoundCountFromHeading() {
+    const heading = document.querySelector('main h1');
+    if (!heading) return null;
+    const match = heading.textContent.match(/nach der\s+(\d+)\.\s*Runde/i);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  function parseCurrentRoundCountFromPrevLink() {
+    const prevLink = document.querySelector('link[rel="prev"]');
+    if (!prevLink) return null;
+    const href = prevLink.getAttribute('href') || '';
+    const match = href.match(/\/tabelle\/(\d+)\/?$/);
+    return match ? parseInt(match[1], 10) + 1 : null;
+  }
+
+  function getTabelleBaseUrl() {
+    const url = new URL(window.location.href);
+    const pathname = url.pathname.replace(/\/$/, '');
+    const match = pathname.match(/^(.*\/tabelle)(?:\/\d+)?$/);
+    return match ? `${url.origin}${match[1]}/` : `${url.origin}${pathname}/`;
+  }
+
+  async function fetchRoundPositions(baseUrl, roundNumber) {
+    // Support round 0 (initial/start list) where the URL uses 'spieler' instead of 'tabelle'
+    let roundUrl;
+    if (roundNumber === 0) {
+      // baseUrl expected to end with '/tabelle/'
+      roundUrl = baseUrl.replace(/\/tabelle\/$$/, '/spieler/');
+      // fallback if replace didn't match exactly
+      if (roundUrl === baseUrl) roundUrl = baseUrl.replace(/tabelle\/?$/, 'spieler/');
+    } else {
+      roundUrl = new URL(`${roundNumber}/`, baseUrl).toString();
+    }
+    try {
+      const response = await fetch(roundUrl);
+      if (!response.ok) {
+        console.warn(`${LOG_PREFIX} No round page found`, { roundNumber, roundUrl, status: response.status });
+        return null;
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const table = doc.querySelector('div.results table');
+      if (!table) {
+        console.warn(`${LOG_PREFIX} Round page missing main table`, { roundNumber, roundUrl });
+        return null;
+      }
+
+      // For round pages we need stable ordering within ties.
+      // Parse rows into objects containing displayed rank, initial standing (tuz) and points.
+      const headerCells = Array.from(table.querySelectorAll('thead th'));
+      const pointsHeaderIndex = headerCells.findIndex((th) => /Pkt|Punkte|Punkte/i.test(th.textContent));
+      const rows = Array.from(table.querySelectorAll('tbody tr'));
+      const parsed = [];
+      rows.forEach((row, index) => {
+        const anchor = row.querySelector('td.person a') || row.querySelector('td a');
+        const name = normalizeName(anchor?.textContent || '');
+        if (!name) return;
+
+        // Rank shown for this round
+        const tzCell = row.querySelector('td.tz') || row.querySelector('td.tz.tableposition');
+        let rankText = tzCell?.textContent?.trim() || '';
+        if (!rankText) {
+          const nested = tzCell?.querySelector('span.identical_place');
+          rankText = nested?.textContent?.trim() || '';
+        }
+        const rank = parseInt((rankText.match(/\d+/) || [NaN])[0], 10);
+
+        // initial standing (tuz)
+        const tuzCell = row.querySelector('td.tuz');
+        const initialText = tuzCell?.textContent?.trim() || '';
+        const initial = parseInt((initialText.match(/\d+/) || [NaN])[0], 10);
+
+        // points (Pkt) - try to use header index first, fallback to first matching 'tm' cell
+        const cells = Array.from(row.querySelectorAll('td'));
+        let points = null;
+        if (pointsHeaderIndex >= 0 && cells[pointsHeaderIndex]) {
+          points = parsePoints(cells[pointsHeaderIndex].textContent || '');
+        }
+        if (points == null) {
+          const candidate = cells.find((td) => td.className && td.className.includes('tm') && /[0-9½]/.test(td.textContent || ''));
+          points = parsePoints(candidate?.textContent || '');
+        }
+
+        parsed.push({ rowIndex: index, name, key: canonicalizeName(name), rank: Number.isFinite(rank) ? rank : Infinity, initial: Number.isFinite(initial) ? initial : Infinity, points: points });
+      });
+
+      // If this is the initial "spieler" page, simply map initial -> ordinal by tuz
+      if (roundNumber === 0) {
+        const positions = new Map();
+        // sort by initial ascending
+        parsed.sort((a, b) => a.initial - b.initial || a.rowIndex - b.rowIndex);
+        parsed.forEach((p, i) => positions.set(p.key, { position: i + 1, points: p.points ?? null }));
+        return positions;
+      }
+
+      // Group by rank, sort groups by rank, and within group sort by initial standing
+      const groups = new Map();
+      parsed.forEach((p) => {
+        const k = String(p.rank);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(p);
+      });
+
+      const sortedRankKeys = Array.from(groups.keys()).map(Number).sort((a, b) => a - b || 0);
+      const positions = new Map();
+      let cursor = 1;
+      for (const rk of sortedRankKeys) {
+        const key = String(rk);
+        const group = groups.get(key) || [];
+        group.sort((a, b) => (a.initial - b.initial) || (a.rowIndex - b.rowIndex));
+        group.forEach((item) => {
+          positions.set(item.key, { position: cursor, points: item.points ?? null });
+          cursor += 1;
+        });
+      }
+      return positions;
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error fetching round positions`, { roundNumber, error });
+      return null;
+    }
+  }
+
+  async function buildPathToFinishData(resultsContainer) {
+    const table = resultsContainer.querySelector('table');
+    if (!table) {
+      console.error(`${LOG_PREFIX} No main table found for path chart.`);
+      return null;
+    }
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    const players = rows.map((row, index) => {
+      const anchor = row.querySelector('td.person a') || row.querySelector('td a');
+      const name = normalizeName(anchor?.textContent || '');
+      const key = canonicalizeName(name);
+      return name && key ? { name, key, currentPosition: index + 1 } : null;
+    }).filter(Boolean);
+
+    if (players.length === 0) {
+      console.error(`${LOG_PREFIX} No players found to build path chart.`);
+      return null;
+    }
+
+    let roundCount = parseCurrentRoundCountFromHeading() ?? parseCurrentRoundCountFromPrevLink();
+    if (!roundCount || roundCount < 1) {
+      console.error(`${LOG_PREFIX} Could not determine total number of rounds for path chart.`);
+      return null;
+    }
+
+    const baseUrl = getTabelleBaseUrl();
+    const positionsByRound = [];
+    // Add initial positions as round 0
+    const initialPositions = await fetchRoundPositions(baseUrl, 0);
+    if (initialPositions && initialPositions.size > 0) positionsByRound.push(initialPositions);
+
+    for (let round = 1; round <= roundCount; round += 1) {
+      const roundPositions = await fetchRoundPositions(baseUrl, round);
+      if (!roundPositions || roundPositions.size === 0) {
+        console.warn(`${LOG_PREFIX} Stopping path chart fetch at missing round`, { round });
+        break;
+      }
+      positionsByRound.push(roundPositions);
+    }
+
+    if (positionsByRound.length === 0) {
+      console.error(`${LOG_PREFIX} No valid round position data available.`);
+      return null;
+    }
+
+    const playersByKey = new Map();
+    players.forEach((player) => {
+      playersByKey.set(player.key, {
+        name: player.name,
+        positions: Array(positionsByRound.length).fill(null),
+        points: Array(positionsByRound.length).fill(null),
+        currentPosition: player.currentPosition
+      });
+    });
+
+    positionsByRound.forEach((roundMap, roundIndex) => {
+      roundMap.forEach((val, key) => {
+        const entry = playersByKey.get(key);
+        if (entry) {
+          entry.positions[roundIndex] = val && typeof val === 'object' ? val.position : val;
+          entry.points[roundIndex] = val && typeof val === 'object' ? (val.points ?? null) : null;
+        }
+      });
+    });
+
+    const sortedPlayers = Array.from(playersByKey.values()).sort((a, b) => {
+      const finalA = a.positions[a.positions.length - 1] ?? a.currentPosition;
+      const finalB = b.positions[b.positions.length - 1] ?? b.currentPosition;
+      return finalA - finalB;
+    });
+    return {
+      players: sortedPlayers,
+      roundCount: positionsByRound.length,
+      maxPosition: players.length
+    };
+  }
+
+  function injectPathChartStyles() {
+    if (document.getElementById('dsj-path-chart-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'dsj-path-chart-styles';
+    style.textContent = `
+      .dsj-path-chart-container { margin-bottom: 1rem; }
+      .dsj-path-chart-title { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 600; }
+      .dsj-path-chart-svg { width: 100%; height: 680px; }
+      .dsj-path-chart-caption { margin-top: 0.5rem; font-size: 0.95rem; color: #222; }
+      .dsj-path-chart-caption strong { font-weight: 600; }
+      .dsj-path-axis line, .dsj-path-axis path { stroke: #666; stroke-width: 1; shape-rendering: crispEdges; }
+      .dsj-path-axis text { fill: #333; font-size: 10px; }
+      .dsj-path-line { fill: none; stroke-width: 1.5; opacity: 0.35; transition: opacity 0.2s ease, stroke-width 0.2s ease; cursor: pointer; }
+      .dsj-path-line-hover, .dsj-path-line:hover { opacity: 1 !important; stroke-width: 3 !important; }
+      .dsj-path-point { stroke-width: 1.5; opacity: 0.6; fill: #fff; transition: opacity 0.2s ease, r 0.2s ease; }
+      .dsj-path-group:hover .dsj-path-point { opacity: 1; r: 4; }
+      .dsj-path-label { font-size: 10px; fill: #000; pointer-events: none; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function createPathToFinishChart(container, players, roundCount, maxPosition) {
+    const margin = { top: 24, right: 160, bottom: 32, left: 40 };
+    const width = 900;
+    const height = 680;
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+    const xStep = roundCount > 1 ? innerWidth / (roundCount - 1) : 0;
+    const yStep = maxPosition > 1 ? innerHeight / (maxPosition - 1) : 0;
+    const colors = [
+      '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+    ];
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('class', 'dsj-path-chart-svg');
+
+    const xAxisGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    xAxisGroup.setAttribute('class', 'dsj-path-axis');
+    // Label rounds starting with 0 (initial positions) up to roundCount-1
+    for (let i = 0; i < roundCount; i += 1) {
+      const x = margin.left + xStep * i;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x);
+      line.setAttribute('y1', margin.top);
+      line.setAttribute('x2', x);
+      line.setAttribute('y2', height - margin.bottom);
+      line.setAttribute('stroke', '#ddd');
+      line.setAttribute('stroke-width', '1');
+      svg.appendChild(line);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', x);
+      label.setAttribute('y', height - 12);
+      label.setAttribute('text-anchor', 'middle');
+      label.textContent = `${i}`;
+      svg.appendChild(label);
+    }
+
+    const yAxisGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    yAxisGroup.setAttribute('class', 'dsj-path-axis');
+    const yTicks = maxPosition <= 12 ? Array.from({ length: maxPosition }, (_, i) => i + 1) : [1, Math.ceil(maxPosition / 2), maxPosition];
+    yTicks.forEach((position) => {
+      const y = margin.top + (position - 1) * yStep;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', margin.left);
+      line.setAttribute('y1', y);
+      line.setAttribute('x2', width - margin.right);
+      line.setAttribute('y2', y);
+      line.setAttribute('stroke', '#eee');
+      line.setAttribute('stroke-width', '1');
+      svg.appendChild(line);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', margin.left - 10);
+      label.setAttribute('y', y + 3);
+      label.setAttribute('text-anchor', 'end');
+      label.textContent = `${position}`;
+      svg.appendChild(label);
+    });
+
+    const chartTitle = document.createElement('h2');
+    chartTitle.setAttribute('class', 'dsj-path-chart-title');
+    chartTitle.textContent = 'Path to Finish';
+    container.appendChild(chartTitle);
+    container.appendChild(svg);
+
+    const caption = document.createElement('div');
+    caption.setAttribute('class', 'dsj-path-chart-caption');
+    caption.textContent = 'Hover over a line or point for details.';
+    container.appendChild(caption);
+
+    const allPaths = [];
+
+    players.forEach((player, index) => {
+      const pathGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      pathGroup.setAttribute('class', 'dsj-path-group');
+      const color = colors[index % colors.length] || `hsl(${(index * 40) % 360}, 70%, 50%)`;
+      let pathString = '';
+      let segmentOpen = false;
+
+      player.positions.forEach((position, roundIndex) => {
+        if (position == null) {
+          segmentOpen = false;
+          return;
+        }
+        const x = margin.left + xStep * roundIndex;
+        const y = margin.top + (position - 1) * yStep;
+        pathString += segmentOpen ? ` L${x},${y}` : `M${x},${y}`;
+        segmentOpen = true;
+      });
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathString);
+      path.setAttribute('stroke', color);
+      path.setAttribute('class', 'dsj-path-line');
+      pathGroup.appendChild(path);
+      allPaths.push(path);
+
+      player.positions.forEach((position, roundIndex) => {
+        if (position == null) return;
+        const x = margin.left + xStep * roundIndex;
+        const y = margin.top + (position - 1) * yStep;
+        const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        point.setAttribute('cx', x);
+        point.setAttribute('cy', y);
+        point.setAttribute('r', '3');
+        point.setAttribute('stroke', color);
+        point.setAttribute('class', 'dsj-path-point');
+
+        const pointTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        const roundLabel = roundIndex === 0 ? 'Start' : `Runde ${roundIndex}`;
+        const totalPoints = player.points ? player.points[roundIndex] : null;
+        const prevPoints = player.points && roundIndex > 0 ? player.points[roundIndex - 1] : null;
+        const delta = (totalPoints != null && prevPoints != null) ? (totalPoints - prevPoints) : null;
+        const deltaText = delta != null ? formatDelta(delta) : '';
+        const pointsText = totalPoints != null ? formatPoints(totalPoints) : '';
+        pointTitle.textContent = `${player.name} — ${roundLabel} — Platz ${position}\nPunkte: ${pointsText}${deltaText ? ' (' + deltaText + ')' : ''}`;
+        point.appendChild(pointTitle);
+
+        point.addEventListener('mouseenter', () => {
+          const line1 = `${player.name} — ${roundLabel} — Platz ${position}`;
+          const line2 = `Punkte: ${pointsText}${deltaText ? ' (' + deltaText + ')' : ''}`;
+          caption.innerHTML = `${line1}<br><strong>${line2}</strong>`;
+        });
+        point.addEventListener('mouseleave', () => {
+          caption.textContent = 'Hover over a line or point for details.';
+        });
+
+        pathGroup.appendChild(point);
+      });
+
+      const lastPositionIndex = player.positions.length - 1;
+      const lastPosition = player.positions[lastPositionIndex];
+      if (lastPosition != null) {
+        const x = width - margin.right + 8;
+        const y = margin.top + (lastPosition - 1) * yStep + 4;
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', x);
+        label.setAttribute('y', y);
+        label.setAttribute('text-anchor', 'start');
+        label.setAttribute('class', 'dsj-path-label');
+        label.textContent = player.name;
+        pathGroup.appendChild(label);
+      }
+
+      const resetCaption = () => {
+        caption.textContent = 'Hover over a line or point for details.';
+      };
+
+      path.addEventListener('mouseenter', () => {
+        caption.textContent = player.name;
+      });
+      path.addEventListener('mouseleave', resetCaption);
+
+      pathGroup.addEventListener('mouseenter', () => {
+        allPaths.forEach((otherPath) => {
+          if (otherPath === path) {
+            otherPath.classList.add('dsj-path-line-hover');
+          } else {
+            otherPath.style.opacity = '0.12';
+          }
+        });
+      });
+      pathGroup.addEventListener('mouseleave', () => {
+        allPaths.forEach((otherPath) => {
+          otherPath.classList.remove('dsj-path-line-hover');
+          otherPath.style.opacity = '';
+        });
+      });
+
+      svg.appendChild(pathGroup);
+    });
+  }
+
+  function isTabellePage() {
+    return window.location.href.includes('/tabelle');
+  }
+
+  function createToggles(mainHeading, onCrossToggle, onBoardToggle, onPathToggle) {
+    const spacer1 = document.createElement('br');
+    const link1 = document.createElement('a');
+    link1.href = '#';
+    link1.textContent = 'Kreuztabelle';
+    setToggleVisualState(link1, false);
+    link1.addEventListener('click', async (event) => {
+      event.preventDefault();
+      await onCrossToggle(link1);
+    });
+    mainHeading.appendChild(spacer1);
+    mainHeading.appendChild(link1);
+    const spacer2 = document.createTextNode(' • ');
+    const link2 = document.createElement('a');
+    link2.href = '#';
+    link2.textContent = 'Brett Ergebnisse';
+    setToggleVisualState(link2, false);
+    link2.addEventListener('click', async (event) => {
+      event.preventDefault();
+      await onBoardToggle(link2);
+    });
+    mainHeading.appendChild(spacer2);
+    mainHeading.appendChild(link2);
+
+    if (typeof onPathToggle === 'function') {
+      const spacer3 = document.createTextNode(' • ');
+      const link3 = document.createElement('a');
+      link3.href = '#';
+      link3.textContent = 'Path to Finish';
+      setToggleVisualState(link3, false);
+      link3.addEventListener('click', async (event) => {
+        event.preventDefault();
+        await onPathToggle(link3);
+      });
+      mainHeading.appendChild(spacer3);
+      mainHeading.appendChild(link3);
+    }
   }
 
   function isEmptyResultCell(cell) {
@@ -891,31 +1343,6 @@
     link.style.fontWeight = isOn ? 'bold' : 'normal';
   }
 
-  function createToggles(mainHeading, onCrossToggle, onBoardToggle) {
-    const spacer1 = document.createTextNode(' ');
-    const link1 = document.createElement('a');
-    link1.href = '#';
-    link1.textContent = 'Kreuztabelle';
-    setToggleVisualState(link1, false);
-    link1.addEventListener('click', async (event) => {
-      event.preventDefault();
-      await onCrossToggle(link1);
-    });
-    mainHeading.appendChild(spacer1);
-    mainHeading.appendChild(link1);
-    const spacer2 = document.createTextNode(' ');
-    const link2 = document.createElement('a');
-    link2.href = '#';
-    link2.textContent = 'Brett Ergebnisse';
-    setToggleVisualState(link2, false);
-    link2.addEventListener('click', async (event) => {
-      event.preventDefault();
-      await onBoardToggle(link2);
-    });
-    mainHeading.appendChild(spacer2);
-    mainHeading.appendChild(link2);
-  }
-
   async function run() {
     if (!isTargetPage()) return;
 
@@ -950,8 +1377,18 @@
     let crossIsVisible = false;
     let boardIsBuilt = false;
     let boardIsVisible = false;
+    let chartIsBuilt = false;
+    let chartIsVisible = false;
     const boardResults = new BoardResults();
     const isDemPage = /\/dem(?:-|\/|$)/i.test(window.location.pathname) || document.body.classList.contains('dem');
+
+    const pathChartContainer = document.createElement('div');
+    pathChartContainer.className = 'dsj-path-chart-container';
+    pathChartContainer.style.display = 'none';
+    if (isTabellePage()) {
+      injectPathChartStyles();
+      resultsContainer.parentNode.insertBefore(pathChartContainer, resultsContainer);
+    }
 
     createToggles(mainHeading, async (toggleLink) => {
       try {
@@ -1009,7 +1446,25 @@
         console.error(`${LOG_PREFIX} Error while toggling board results`, error);
         setToggleVisualState(toggleLink, false);
       }
-    });
+    }, isTabellePage() ? async (toggleLink) => {
+      try {
+        if (!chartIsBuilt) {
+          const chartData = await buildPathToFinishData(resultsContainer);
+          if (!chartData) {
+            console.error(`${LOG_PREFIX} Failed to build Path to Finish chart.`);
+            return;
+          }
+          createPathToFinishChart(pathChartContainer, chartData.players, chartData.roundCount, chartData.maxPosition);
+          chartIsBuilt = true;
+        }
+        chartIsVisible = !chartIsVisible;
+        pathChartContainer.style.display = chartIsVisible ? '' : 'none';
+        setToggleVisualState(toggleLink, chartIsVisible);
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error while toggling Path to Finish chart`, error);
+        setToggleVisualState(toggleLink, false);
+      }
+    } : null);
   }
 
   run();
