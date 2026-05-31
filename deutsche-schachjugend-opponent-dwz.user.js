@@ -26,6 +26,8 @@
   const PLAYER_LIST_DIFF_CELL_CLASS = 'dsj-player-diff-cell';
   const PLAYER_LIST_LEISTUNG_HEADER_CLASS = 'dsj-player-leistung-header';
   const PLAYER_LIST_LEISTUNG_CELL_CLASS = 'dsj-player-leistung-cell';
+  const HISTORY_NEW_DWZ_ROW_CLASS = 'dsj-history-new-dwz-row';
+  const HISTORY_LEISTUNG_ROW_CLASS = 'dsj-history-leistung-row';
 
   // K factor calculation constants
   const K_MAX = 80;
@@ -355,12 +357,13 @@
       const playerName = extractPlayerName(doc);
       const table = doc.querySelector('div.results table.spieler') || doc.querySelector('div.results table');
 
+
       if (!playerName || !table) {
-        console.info(`${LOG_PREFIX} Player page missing required data`, { playerHref, playerName, hasTable: !!table });
         return null;
       }
 
       const games = collectIndividualTournamentGames(table, playerName);
+      
       const opponentRatings = [];
       const opponentResults = [];
 
@@ -371,6 +374,7 @@
         }
       }
 
+
       let calc;
       if (playerDwz == null) {
         calc = calculateInitialDwz(opponentRatings, opponentResults);
@@ -379,7 +383,8 @@
       }
 
       const performance = calculatePerformance(opponentRatings, opponentResults, playerDwz);
-      return {
+
+      const result = {
         playerHref,
         playerName,
         playerDwz,
@@ -389,8 +394,9 @@
         opponentRatings,
         opponentResults
       };
+      return result;
     } catch (error) {
-      console.error(`${LOG_PREFIX} Error fetching player page`, { playerHref, error });
+      console.error(`${LOG_PREFIX} Error fetching player page`, { playerHref, error, stack: error.stack });
       return null;
     }
   }
@@ -411,7 +417,6 @@
     const playerIndex = findPlayerColumnIndex(table);
     const dwzColumnIndex = findDwzColumnIndex(table);
     if (playerIndex < 0 || !headerRow) {
-      console.info(`${LOG_PREFIX} Could not find player column in list table.`);
       return;
     }
 
@@ -717,9 +722,6 @@
       if (currentDwz == null) {
         const initialCalc = calculateInitialDwz(opponentRatings, opponentResults);
         if (initialCalc == null) {
-          console.info(`${LOG_PREFIX} No current DWZ and insufficient valid games for first DWZ estimate.`, {
-            rowId: row.id || null
-          });
           calculations.push(null);
           continue;
         }
@@ -801,7 +803,6 @@
 
     const dwzColumnIndex = findDwzColumnIndex(table);
     if (dwzColumnIndex < 0) {
-      console.info(`${LOG_PREFIX} Could not find DWZ header for new DWZ column.`);
       return;
     }
 
@@ -968,7 +969,7 @@
 
   function isIndividualTournamentPage() {
     const url = window.location.href;
-    return url.includes('dem') && url.includes('spieler');
+    return (url.includes('dem') || url.includes('odjm')) && url.includes('spieler');
   }
 
   function extractPlayerDwzFromCard(root = document) {
@@ -1072,7 +1073,6 @@
       const isPlayerWhite = canonicalizeName(whiteName) === canonicalizeName(playerName);
       const isPlayerBlack = canonicalizeName(blackName) === canonicalizeName(playerName);
 
-      console.info(`${LOG_PREFIX} Parsed row players`, { whiteName, blackName, isPlayerWhite, isPlayerBlack });
 
       if (!isPlayerWhite && !isPlayerBlack) continue;
 
@@ -1102,10 +1102,8 @@
         resultValue,
         isPlayerWhite
       });
-      console.info(`${LOG_PREFIX} Collected game`, { opponentDwz, resultValue, isPlayerWhite });
     }
 
-    console.info(`${LOG_PREFIX} Total games collected for player`, { playerName, count: games.length });
     return games;
   }
 
@@ -1125,14 +1123,12 @@
   function renderIndividualTournamentToggle(container, table, playerDwz, birthYear, playerName) {
     // Place toggle as a new line after the player name header, not the banner header
     const h1 = document.querySelector('main.text h1') || document.querySelector('#content h1') || document.querySelector('h1');
-    console.info(`${LOG_PREFIX} renderIndividualTournamentToggle called`, { playerDwz, birthYear, playerName, hasH1: !!h1, h1Selector: h1 ? h1.outerHTML.slice(0, 200) : null, tableExists: !!table, containerExists: !!container });
     if (!h1) {
       console.warn(`${LOG_PREFIX} No <h1> found; cannot place toggle`);
       return;
     }
     // Avoid duplicate
     if (h1.parentNode.querySelector('.dsj-individual-toggle')) {
-      console.info(`${LOG_PREFIX} dsj-individual-toggle already exists`);
       return;
     }
 
@@ -1146,17 +1142,23 @@
     link.href = '#';
     link.textContent = 'new DWZ + Leistung';
     link.style.fontWeight = 'normal';
-    link.addEventListener('click', (event) => {
+    link.addEventListener('click', async (event) => {
       event.preventDefault();
       const isEnabled = link.style.fontWeight === 'bold';
-      console.info(`${LOG_PREFIX} Toggle clicked`, { playerName, currentlyEnabled: isEnabled });
       if (isEnabled) {
-        console.info(`${LOG_PREFIX} Disabling individual tournament calculations`);
         removeIndividualTournamentCalculations(table);
+        const historyTable = findHistoryTable();
+        if (historyTable) {
+          removeHistoryCalculations(historyTable);
+        }
         link.style.fontWeight = 'normal';
       } else {
-        console.info(`${LOG_PREFIX} Enabling individual tournament calculations`);
         renderIndividualTournamentCalculations(table, playerDwz, birthYear, playerName);
+        const historyTable = findHistoryTable();
+        if (historyTable) {
+          await renderHistoryCalculations(historyTable);
+        } else {
+        }
         link.style.fontWeight = 'bold';
       }
     });
@@ -1168,25 +1170,19 @@
   function renderIndividualTournamentCalculations(table, playerDwz, birthYear, playerName) {
     removeIndividualTournamentCalculations(table);
 
-    console.info(`${LOG_PREFIX} renderIndividualTournamentCalculations start`, { playerName, playerDwz, birthYear });
     const games = collectIndividualTournamentGames(table, playerName);
-    console.info(`${LOG_PREFIX} Collected games from table`, { count: games.length });
     const opponentRatings = [];
     const opponentResults = [];
     const gameDetails = [];
 
     for (const game of games) {
-      console.info(`${LOG_PREFIX} Processing game row`, { opponentDwz: game.opponentDwz, resultValue: game.resultValue, isPlayerWhite: game.isPlayerWhite });
       if (game.opponentDwz != null && game.resultValue != null) {
         opponentRatings.push(game.opponentDwz);
         opponentResults.push(game.resultValue);
         gameDetails.push(game);
       } else {
-        console.info(`${LOG_PREFIX} Skipping game for calculation due to missing opponentDWZ or result`, { game });
       }
     }
-    console.info(`${LOG_PREFIX} opponentRatings`, { opponentRatings });
-    console.info(`${LOG_PREFIX} opponentResults`, { opponentResults });
 
     // Calculate new DWZ
     let calc;
@@ -1198,7 +1194,6 @@
 
     // Calculate performance
     const performance = calculatePerformance(opponentRatings, opponentResults, playerDwz);
-    console.info(`${LOG_PREFIX} Calculation outputs`, { calc, performance });
 
     // Insert new row under playercard 'Wertung:' with new DWZ and Leistung
     const playercard = document.querySelector('div.playercard table');
@@ -1285,7 +1280,6 @@
       const newRow = card.querySelector('tr.dsj-new-wertung-row');
       if (newRow) {
         newRow.remove();
-        console.info(`${LOG_PREFIX} Removed New Wertung row`);
       }
     }
 
@@ -1293,7 +1287,6 @@
     const expectedSpans = table.querySelectorAll('.dsj-expected');
     if (expectedSpans.length) {
       expectedSpans.forEach(s => s.remove());
-      console.info(`${LOG_PREFIX} Removed expected spans`, { count: expectedSpans.length });
     }
 
     // Remove expected text from game link titles
@@ -1309,39 +1302,152 @@
         }
       }
     });
-    if (titlesStripped) console.info(`${LOG_PREFIX} Stripped Erwartet from ${titlesStripped} link titles`);
+  }
+
+  function findHistoryTable() {
+    const table = document.querySelector('table.dsj-history-table');
+    if (table && table.tagName === 'TABLE') {
+      return table;
+    }
+    return null;
+  }
+
+  function extractHistoryYearLinks(historyTable) {
+    const headerRow = historyTable.querySelector('tr');
+    if (!headerRow) return [];
+    const headerCells = Array.from(headerRow.querySelectorAll('th'));
+    const yearLinks = [];
+    for (let i = 1; i < headerCells.length; i++) {
+      const link = headerCells[i].querySelector('a');
+      if (link && link.href) {
+        const url = new URL(link.href, window.location.href).toString();
+        yearLinks.push({
+          year: headerCells[i].textContent.trim(),
+          href: url,
+          columnIndex: i
+        });
+      }
+    }
+    return yearLinks;
+  }
+
+  function removeHistoryCalculations(historyTable) {
+    const rowsRemoved = historyTable.querySelectorAll(`.${HISTORY_NEW_DWZ_ROW_CLASS}, .${HISTORY_LEISTUNG_ROW_CLASS}`).length;
+    historyTable.querySelectorAll(`.${HISTORY_NEW_DWZ_ROW_CLASS}, .${HISTORY_LEISTUNG_ROW_CLASS}`).forEach((el) => el.remove());
+  }
+
+  async function renderHistoryCalculations(historyTable) {
+    removeHistoryCalculations(historyTable);
+
+    const yearLinks = extractHistoryYearLinks(historyTable);
+    if (yearLinks.length === 0) {
+      return;
+    }
+
+    const headerRow = historyTable.querySelector('tr');
+    const allRows = Array.from(historyTable.querySelectorAll('tr'));
+    const dataRows = allRows.slice(1);
+
+    try {
+      const results = await Promise.all(yearLinks.map((yl) => {
+        return fetchPlayerPageCalculations(yl.href);
+      }));
+      
+      results.forEach((result, idx) => {
+        if (result) {
+        } else {
+        }
+      });
+
+      const newDwzRow = document.createElement('tr');
+      newDwzRow.className = HISTORY_NEW_DWZ_ROW_CLASS;
+      const newDwzLabel = document.createElement('td');
+      newDwzLabel.style.fontWeight = 'bold';
+      newDwzLabel.style.border = '1px solid rgb(204, 204, 204)';
+      newDwzLabel.style.padding = '8px';
+      newDwzLabel.style.textAlign = 'left';
+      newDwzLabel.textContent = 'New DWZ';
+      newDwzRow.appendChild(newDwzLabel);
+
+      const leistungRow = document.createElement('tr');
+      leistungRow.className = HISTORY_LEISTUNG_ROW_CLASS;
+      const leistungLabel = document.createElement('td');
+      leistungLabel.style.fontWeight = 'bold';
+      leistungLabel.style.border = '1px solid rgb(204, 204, 204)';
+      leistungLabel.style.padding = '8px';
+      leistungLabel.style.textAlign = 'left';
+      leistungLabel.textContent = 'Leistung';
+      leistungRow.appendChild(leistungLabel);
+
+      results.forEach((result, idx) => {
+        const newDwzCell = document.createElement('td');
+        newDwzCell.style.border = '1px solid rgb(204, 204, 204)';
+        newDwzCell.style.padding = '8px';
+        newDwzCell.style.textAlign = 'center';
+        const leistungCell = document.createElement('td');
+        leistungCell.style.border = '1px solid rgb(204, 204, 204)';
+        leistungCell.style.padding = '8px';
+        leistungCell.style.textAlign = 'center';
+
+        if (result && result.calc) {
+          newDwzCell.textContent = `${result.calc.newDwz}`;
+          if (result.playerDwz != null) {
+            const delta = result.calc.newDwz - result.playerDwz;
+            const deltaText = delta >= 0 ? `+${delta}` : `${delta}`;
+            const deltaColor = delta > 0 ? 'green' : delta < 0 ? 'red' : 'black';
+            newDwzCell.innerHTML = `${result.calc.newDwz} <span style="color: ${deltaColor};">(${deltaText})</span>`;
+            newDwzCell.title = `Neue DWZ: ${result.calc.newDwz}`;
+          } else {
+            newDwzCell.textContent = `${result.calc.newDwz} (neu)`;
+            newDwzCell.title = `Erste DWZ geschätzt: ${result.calc.newDwz}`;
+          }
+
+          if (result.performance != null) {
+            leistungCell.textContent = `${result.performance}`;
+            leistungCell.title = `Leistung: ${result.performance}`;
+          } else {
+          }
+        } else {
+        }
+
+        newDwzRow.appendChild(newDwzCell);
+        leistungRow.appendChild(leistungCell);
+      });
+
+      const lastRow = dataRows[dataRows.length - 1];
+      if (lastRow) {
+        lastRow.parentNode.insertBefore(newDwzRow, lastRow.nextSibling);
+        lastRow.parentNode.insertBefore(leistungRow, newDwzRow.nextSibling);
+      } else {
+        console.warn(`${LOG_PREFIX} renderHistoryCalculations: no lastRow found, cannot insert rows`);
+      }
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error rendering history calculations`, { error, stack: error.stack });
+    }
   }
 
   function run() {
-    console.info(`${LOG_PREFIX} Script started`, { href: window.location.href });
 
     // Check if this is an individual tournament player page
     if (isIndividualTournamentPage()) {
-      console.info(`${LOG_PREFIX} isIndividualTournamentPage passed`);
       const container = document.querySelector('div.results');
       const table = container?.querySelector('table.spieler');
-      console.info(`${LOG_PREFIX} Found elements`, { container: !!container, table: !!table });
       if (!container || !table) {
-        console.info(`${LOG_PREFIX} No individual tournament table found on this page.`);
         return;
       }
 
       const playerDwz = extractPlayerDwzFromCard();
       const birthYear = extractPlayerBirthYear();
       const playerName = extractPlayerName();
-      console.info(`${LOG_PREFIX} Extracted player info`, { playerName, playerDwz, birthYear });
 
       if (!playerName) {
-        console.info(`${LOG_PREFIX} Could not extract player name.`);
         return;
       }
-      console.info(`${LOG_PREFIX} entering renderIndividualTournamentToggle`);
       renderIndividualTournamentToggle(container, table, playerDwz, birthYear, playerName);
       return;
     }
 
     if (isStatePage()) {
-      console.info(`${LOG_PREFIX} isStatePage passed`);
       const stateTable = document.querySelector('table.lv');
       if (stateTable) {
         renderStateListToggle(stateTable);
@@ -1350,7 +1456,6 @@
     }
 
     if (isTablePage()) {
-      console.info(`${LOG_PREFIX} isTablePage passed`);
       const table = document.querySelector('div.results table');
       if (table && table.querySelector('td.person a')) {
         renderPlayerListToggle(table);
@@ -1361,7 +1466,6 @@
     // Original team tournament logic
     const resultsContainers = Array.from(document.querySelectorAll('div.results'));
     if (resultsContainers.length === 0) {
-      console.info(`${LOG_PREFIX} No results table found on this page.`);
       return;
     }
 
@@ -1377,10 +1481,6 @@
         : null;
       renderToggle(heading, entries, table);
       applyMode(entries, 'none');
-    }
-
-    if (!hasTable) {
-      console.info(`${LOG_PREFIX} No results table found on this page.`);
     }
   }
 
