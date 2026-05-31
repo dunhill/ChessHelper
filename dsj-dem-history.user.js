@@ -73,6 +73,7 @@
             startPosition: null,
             finalPosition: null,
             points: null,
+            rounds: null,
             dwz: null,
             elo: null
         };
@@ -135,6 +136,12 @@
                     }
                 }
             }
+        }
+
+        const opponentTable = doc.querySelector('table.spieler');
+        if (opponentTable) {
+            const opponentRows = Array.from(opponentTable.querySelectorAll('tr')).filter(row => row.querySelectorAll('td').length > 0);
+            data.rounds = opponentRows.length;
         }
 
         return data;
@@ -236,6 +243,7 @@
         playerDataList.sort((a, b) => a.year - b.year);
 
         const table = document.createElement('table');
+        table.className = 'dsj-history-table';
         table.style.marginTop = '20px';
         table.style.borderCollapse = 'collapse';
         table.style.width = '100%';
@@ -315,15 +323,14 @@
         createRow('Tournament', data => data.tournament);
         createRow('Starting Position', data => data.startPosition);
         createRow('Final Position', data => data.finalPosition);
-        createRow('Points', data => data.points);
+        createRow('Points', data => `${data.points} / ${data.rounds}`);
         createRow('DWZ', data => data.dwz);
         createRow('ELO', data => data.elo);
 
         return table;
     }
 
-    // Main function
-    async function main() {
+    async function loadHistoricalData(container) {
         const playerName = getPlayerName();
         if (!playerName) {
             console.log('Could not find player name');
@@ -341,14 +348,7 @@
 
         console.log(`Searching for ${playerName} from ${startYear} to ${currentYear}`);
 
-        // Insert heading and loading spinner immediately
-        const main = document.querySelector('main');
-        if (!main) return;
-
-        const heading = document.createElement('h2');
-        heading.textContent = 'Historical Data';
-        heading.style.marginTop = '30px';
-        main.parentNode.insertBefore(heading, main.nextSibling);
+        container.innerHTML = '';
 
         const loadingDiv = document.createElement('div');
         loadingDiv.id = 'dsj-history-loading';
@@ -357,15 +357,14 @@
         loadingDiv.style.textAlign = 'center';
         loadingDiv.style.color = '#666';
         loadingDiv.innerHTML = '<p>Loading historical data...</p>';
-        main.parentNode.insertBefore(loadingDiv, heading.nextSibling);
+        container.appendChild(loadingDiv);
 
         const playerDataList = [];
 
-        // Search for player in each year
         for (let year = startYear; year <= currentYear; year++) {
             console.log(`Searching in year ${year}...`);
             const profileUrl = await searchPlayerInYear(playerName, year);
-            
+
             if (profileUrl) {
                 console.log(`Found profile for ${year}: ${profileUrl}`);
                 const playerData = await fetchPlayerData(profileUrl, year);
@@ -378,8 +377,12 @@
             }
         }
 
-        // Remove loading spinner
         loadingDiv.remove();
+
+        const heading = document.createElement('h2');
+        heading.textContent = 'Historical Data';
+        heading.style.marginTop = '30px';
+        container.appendChild(heading);
 
         if (playerDataList.length === 0) {
             console.log('No historical data found');
@@ -389,15 +392,13 @@
             noDataDiv.style.textAlign = 'center';
             noDataDiv.style.color = '#666';
             noDataDiv.textContent = 'No historical data found for this player.';
-            main.parentNode.insertBefore(noDataDiv, heading.nextSibling);
+            container.appendChild(noDataDiv);
             return;
         }
 
-        // Create and insert the table
         const table = createHistoryTable(playerDataList);
-        main.parentNode.insertBefore(table, heading.nextSibling);
-        
-        // Initialize magnific-popup on the new photos if the library is available
+        container.appendChild(table);
+
         if (typeof $ !== 'undefined' && $.magnificPopup) {
             $('.js-gallery').magnificPopup({
                 delegate: 'a.js-img',
@@ -409,6 +410,49 @@
         }
     }
 
-    // Run the script
-    main();
+    function setupHistoryToggle() {
+        const heading = document.querySelector('main h1');
+        if (!heading) return;
+
+        const toggleContainer = document.createElement('p');
+        toggleContainer.style.marginTop = '10px';
+
+        const toggleLink = document.createElement('a');
+        toggleLink.href = '#';
+        toggleLink.textContent = 'Historical Data';
+        toggleLink.style.color = '#0066cc';
+        toggleLink.style.textDecoration = 'none';
+        toggleLink.style.cursor = 'pointer';
+
+        toggleContainer.appendChild(toggleLink);
+        heading.parentNode.insertBefore(toggleContainer, heading.nextSibling);
+
+        const historySection = document.createElement('div');
+        historySection.id = 'dsj-history-section';
+        heading.parentNode.insertBefore(historySection, toggleContainer.nextSibling);
+
+        let isVisible = false;
+        let isLoading = false;
+
+        toggleLink.addEventListener('click', async (event) => {
+            event.preventDefault();
+            if (isLoading) return;
+
+            if (isVisible) {
+                historySection.innerHTML = '';
+                toggleLink.textContent = 'Historical Data';
+                isVisible = false;
+                return;
+            }
+
+            isLoading = true;
+            toggleLink.textContent = 'Loading Historical Data...';
+            await loadHistoricalData(historySection);
+            toggleLink.textContent = 'Hide Historical Data';
+            isVisible = true;
+            isLoading = false;
+        });
+    }
+
+    setupHistoryToggle();
 })();
