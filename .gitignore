@@ -1,5 +1,6 @@
 # Ignore local large CSV with player data (kept out of the repo)
-spieler.csv
+examples/spieler.csv
+examples/LV-0-csv_v2.zip
 
 # Common ignores
 node_modules/
