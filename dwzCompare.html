@@ -1865,7 +1865,7 @@
       });
 
       searchBtn.addEventListener('click', async () => {
-        const searchName = (nameInput.value || '').trim();
+        const searchName = (nameInput.value || '').trim().toLowerCase();
         if (!searchName) {
           alert('Bitte einen Namen eingeben.');
           return;
