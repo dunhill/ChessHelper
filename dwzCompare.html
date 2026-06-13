@@ -328,8 +328,15 @@
 
     // Simple helper to work around same-origin restrictions when fetching
     // remote pages from within the browser.
-    // Change these proxies if they become unavailable.
+    // Change these proxies if they become unavailable. Prefer stable proxies
+    // first. If these all fail, consider serving this page via a local HTTP
+    // server (e.g. `python -m http.server`) so some proxies accept a non-null origin.
     const corsProxyProviders = [
+      // Prefer a local proxy when available (run local_proxy.py)
+      (targetUrl) => `http://localhost:5000/proxy?url=${encodeURIComponent(targetUrl)}`,
+      // Good general-purpose fallback that adds CORS headers
+      (targetUrl) => `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+      // older proxies (kept for compatibility)
       (targetUrl) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
       (targetUrl) => `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
       (targetUrl) => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(targetUrl)}`
@@ -349,7 +356,10 @@
           console.warn('CORS proxy fetch failure', proxyUrl, err);
         }
       }
-      throw lastError || new Error('All CORS proxies failed');
+      // Provide a more helpful error message: include last proxy error
+      // and a suggestion to run the page via HTTP if running from file://
+      const lastMsg = (lastError && lastError.message) ? lastError.message : String(lastError || 'unknown');
+      throw new Error(`All CORS proxies failed. Last error: ${lastMsg}. If you are opening this file via file://, try serving it via a local HTTP server (e.g. python -m http.server) or update the proxy list.`);
     }
 
     // --- Spieler CSV loader (load once, keep mapping name->ID in memory) ---
