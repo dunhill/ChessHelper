@@ -194,6 +194,7 @@
     <table id="pkzTable" aria-label="Spieler Liste" style="width:100%; border-collapse:collapse;">
       <thead>
         <tr>
+          <th style="text-align:left; padding:6px;">#</th>
           <th style="text-align:left; padding:6px;">ID</th>
           <th style="text-align:left; padding:6px;">Verein</th>
           <th style="text-align:left; padding:6px;">Name</th>
@@ -202,10 +203,11 @@
           <th style="text-align:left; padding:6px;">Cached DWZ</th>
           <th style="text-align:left; padding:6px;">Cached Elo</th>
           <th style="text-align:left; padding:6px;">FIDE Country</th>
+          <th style="text-align:left; padding:6px;">Aktion</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td colspan="8" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>
+        <tr><td colspan="10" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>
       </tbody>
     </table>
     <input type="hidden" id="pkz" value="">
@@ -362,6 +364,169 @@
       throw new Error(`All CORS proxies failed. Last error: ${lastMsg}. If you are opening this file via file://, try serving it via a local HTTP server (e.g. python -m http.server) or update the proxy list.`);
     }
 
+    // ===== STATE MANAGEMENT: pkz input is the source of truth for player IDs =====
+    // All visualizations (table, toggles, chart) are derived from this single source.
+    // This ensures one-way data flow and prevents inconsistencies.
+
+    const pkzInput = () => document.getElementById('pkz');
+    
+    // Get current player IDs from the source of truth
+    function getPlayerIds() {
+      const val = (pkzInput().value || '').trim();
+      return val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
+    }
+    
+    // Update the source of truth and trigger all visualization updates
+    function setPlayerIds(ids) {
+      const normalizedIds = ids
+        .map(id => (id || '').toString().trim())
+        .filter(Boolean);
+      const uniqueIds = [...new Set(normalizedIds)];
+      const newValue = uniqueIds.join(',');
+      const oldValue = pkzInput().value;
+      if (newValue !== oldValue) {
+        pkzInput().value = newValue;
+        savePreviousInput(newValue);
+      }
+      // Always trigger visualization update (even if value didn't change, UI may need refresh)
+      updateAllVisualizations();
+      // Log the final state
+      logPlayerIdList();
+    }
+    
+    // Add IDs to the list (merge with existing)
+    function addPlayerIds(idsToAdd) {
+      const current = getPlayerIds();
+      const combined = [...new Set([...current, ...idsToAdd.map(id => (id || '').toString().trim())])]; // deduplicate
+      setPlayerIds(combined);
+    }
+    
+    // Clear all player IDs
+    function clearPlayerIds() {
+      console.log('🗑️  Clearing all player IDs');
+      setPlayerIds([]);
+    }
+    
+    function removePlayerId(idToRemove) {
+      const current = getPlayerIds();
+      const updated = current.filter(id => id !== idToRemove);
+      console.log(`❌ Entferne Spieler-ID: ${idToRemove}`);
+      setPlayerIds(updated);
+    }
+    
+    // Log the current player ID list
+    function logPlayerIdList() {
+      const ids = getPlayerIds();
+      if (ids.length === 0) {
+        console.log('📋 Player ID list is now EMPTY');
+      } else {
+        console.log(`📋 Player ID list (${ids.length} player${ids.length !== 1 ? 's' : ''}): ${ids.join(', ')}`);
+      }
+    }
+    
+    // Update all UI visualizations based on the current source of truth (pkz input)
+    function updateAllVisualizations() {
+      updatePkzTable();
+      savePreviousInput(pkzInput().value);
+    }
+    
+    // Refresh the player info table (display derived from source of truth)
+    function updatePkzTable() {
+      const ids = getPlayerIds();
+      const tbl = document.getElementById('pkzTable');
+      if (!tbl) return;
+      
+      const tbody = tbl.querySelector('tbody');
+      tbody.innerHTML = '';
+      if (ids.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>';
+        return;
+      }
+      
+      // Filter out any non-numeric IDs (only show valid player IDs)
+      const validIds = ids.filter(id => {
+        const isValid = /^\d+$/.test(id); // Player IDs should be purely numeric
+        if (!isValid) {
+          console.warn(`⚠️  Skipping invalid player ID in visualization: "${id}" (not numeric)`);
+        }
+        return isValid;
+      });
+      
+      if (validIds.length === 0) {
+        console.warn(`⚠️  No valid player IDs in visualization. ID list: [${ids.join(', ')}]`);
+        tbody.innerHTML = '<tr><td colspan="10" style="color:#f00; padding:8px;">Keine gültigen Spieler-IDs.</td></tr>';
+        return;
+      }
+
+      validIds.forEach((id, idx) => {
+        const tr = document.createElement('tr');
+        // Index column (1-based)
+        const tdIndex = document.createElement('td');
+        tdIndex.textContent = (idx + 1).toString();
+        tdIndex.style.padding = '6px';
+        tdIndex.style.fontWeight = '600';
+        tr.appendChild(tdIndex);
+
+        const tdId = document.createElement('td');
+        tdId.textContent = id;
+        tdId.style.padding = '6px';
+        tr.appendChild(tdId);
+        
+        const playerData = spielerIdToDataMap ? spielerIdToDataMap.get(id) : null;
+        
+        const tdVereIn = document.createElement('td');
+        tdVereIn.textContent = playerData && playerData.vereinId ? playerData.vereinId : '';
+        tdVereIn.style.padding = '6px';
+        tr.appendChild(tdVereIn);
+        
+        const tdName = document.createElement('td');
+        tdName.textContent = playerData && playerData.name ? playerData.name : '';
+        tdName.style.padding = '6px';
+        tr.appendChild(tdName);
+        
+        const tdYoB = document.createElement('td');
+        tdYoB.textContent = playerData && playerData.birthYear ? playerData.birthYear : '';
+        tdYoB.style.padding = '6px';
+        tr.appendChild(tdYoB);
+        
+        const tdGender = document.createElement('td');
+        tdGender.textContent = playerData && playerData.gender ? playerData.gender : '';
+        tdGender.style.padding = '6px';
+        tr.appendChild(tdGender);
+        
+        const tdDWZ = document.createElement('td');
+        tdDWZ.textContent = playerData && playerData.dwzValue ? playerData.dwzValue : '';
+        tdDWZ.style.padding = '6px';
+        tr.appendChild(tdDWZ);
+        
+        const tdFideElo = document.createElement('td');
+        tdFideElo.textContent = playerData && playerData.fideElo ? playerData.fideElo : '';
+        tdFideElo.style.padding = '6px';
+        tr.appendChild(tdFideElo);
+        
+        const tdFideCountry = document.createElement('td');
+        tdFideCountry.textContent = playerData && playerData.fideCountry ? playerData.fideCountry : '';
+        tdFideCountry.style.padding = '6px';
+        tr.appendChild(tdFideCountry);
+        
+        const tdRemove = document.createElement('td');
+        tdRemove.style.padding = '6px';
+        const removeLink = document.createElement('a');
+        removeLink.href = '#';
+        removeLink.textContent = 'remove';
+        removeLink.style.color = '#d00';
+        removeLink.style.textDecoration = 'underline';
+        removeLink.addEventListener('click', event => {
+          event.preventDefault();
+          removePlayerId(id);
+        });
+        tdRemove.appendChild(removeLink);
+        tr.appendChild(tdRemove);
+        
+        tbody.appendChild(tr);
+      });
+    }
+
     // --- Spieler CSV loader (load once, keep mapping name->ID in memory) ---
     // ID is column 0, Spielername is column 4 (0-based indices). The CSV is
     // large; we keep the map in memory for the runtime. We key by a
@@ -373,49 +538,43 @@
 
     function normalizeSpielerName(s) {
       if (!s) return '';
-      // Normalize German umlauts to base characters to handle encoding issues
-      // This allows matching even if CSV has corrupted umlauts
-      let normalized = s
-        .replace(/[äÄ]/g, 'a')
-        .replace(/[öÖ]/g, 'o')
-        .replace(/[üÜ]/g, 'u')
-        .replace(/[ß]/g, 'ss');
-      // collapse whitespace, remove spaces after commas, trim and lowercase
-      return normalized.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+      const normalized = s.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
+      // Replace all non-alphabetical characters with '?'. This handles invalid or corrupted
+      // CSV characters in place of umlauts while keeping the same relative shape.
+      return normalized.replace(/[^a-z, -]/g, '?');
     }
-
-    // Create a regex pattern from a search string that matches umlauts as wildcards
-    // This helps when CSV has encoding issues where umlauts are replaced by a single symbol
-    function createUmlautFuzzyPattern(searchName) {
-      if (!searchName) return null;
+ 
+    // Enhanced search: try exact match first, then word-based match
+    function findPlayerIdByName(searchName, csvMap) {
+      if (!searchName || !csvMap) return null;
       
-      // Only create fuzzy pattern if the original string contains umlauts
-      // This avoids false positives when searching for names without umlauts
-      const hasUmlaut = /[äöüÄÖÜß]/.test(searchName);
-      if (!hasUmlaut) return new RegExp(searchName, 'i');
+      const normalized = normalizeSpielerName(searchName);
       
-      // Use a placeholder that won't appear in names to mark umlaut positions
-      const placeholder = '\u0001'; // Use a control character as placeholder
-      let pattern = searchName
-        .replace(/[äÄ]/g, placeholder)  // Mark ä positions
-        .replace(/[öÖ]/g, placeholder)   // Mark ö positions
-        .replace(/[üÜ]/g, placeholder)   // Mark ü positions
-        .replace(/[ß]/g, 'ss');           // ß -> ss
-      
-      // Normalize: collapse whitespace, remove spaces after commas, trim and lowercase
-      pattern = pattern.replace(/\s+/g, ' ').replace(/,\s*/g, ',').trim().toLowerCase();
-      
-      // Escape special regex characters first
-      pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Then replace placeholder with . (wildcard) - this won't be escaped since placeholder is not a regex special char
-      pattern = pattern.replace(new RegExp(placeholder, 'g'), '.');
-      
-      try {
-        return new RegExp(pattern, 'i');
-      } catch (e) {
-        console.warn('Failed to create fuzzy pattern for:', searchName, e);
-        return null;
+      // 1. Try exact normalized match
+      let result = csvMap.get(normalized);
+      if (result) {
+        console.log(`    ✓ Exact match found via normalized key`);
+        return result.id;
       }
+      
+      // 2. Try word-based partial match (in case of name variations)
+      const searchWords = normalized.split(/[\s,.-]+/).filter(w => w.length > 2);
+      if (searchWords.length > 0) {
+        console.log(`    Trying word-based search with words: ${searchWords.join(', ')}`);
+        for (const [mapKey, mapInfo] of csvMap.entries()) {
+          const mapWords = mapKey.split(/[\s,.-]+/).filter(w => w.length > 2);
+          // Check if all search words are present in the map entry
+          const allWordsMatch = searchWords.every(sw => 
+            mapWords.some(mw => mw.includes(sw) || sw.includes(mw))
+          );
+          if (allWordsMatch) {
+            console.log(`    ✓ Word-based match found: "${mapKey}"`);
+            return mapInfo.id;
+          }
+        }
+      }
+      
+      return null;
     }
 
     async function loadSpielerCsv() {
@@ -434,6 +593,16 @@
             }
           }
 
+          // Clean corrupted replacement characters (U+FFFD) that break CSV parsing
+          // When the CSV file has encoding issues, umlauts are replaced with U+FFFD
+          // which breaks the CSV line parsing. Replace them with '?' to preserve field structure.
+          const replacementCharCount = (text.match(/\ufffd/g) || []).length;
+          text = text.replace(/\ufffd/g, '?');
+          if (replacementCharCount > 0) {
+            const replacementCharCount2 = (text.match(/\ufffd/g) || []).length;
+            console.log(`🧹 Cleaned ${replacementCharCount} corrupted replacement character(s) from CSV. Remaining: ${replacementCharCount2}`);
+          }
+
           const lines = text.split(/\r?\n/);
           const map = new Map();
           let startIdx = 0;
@@ -441,6 +610,8 @@
 
           for (let i = startIdx; i < lines.length; i++) {
             const line = lines[i];
+            // Log every CSV line fetched for debugging/verification
+            //console.log(`CSV line ${i}: ${line}`);
             if (!line) continue;
             const fields = parseCsvLine(line);
             if (!fields || fields.length < 10) continue;
@@ -603,6 +774,38 @@
       }
     }
 
+    // Try decoding a Uint8Array with multiple encodings and pick the best result
+    function decodeUint8Array(uint8) {
+      const encodings = ['utf-8', 'windows-1252', 'iso-8859-1', 'latin1'];
+      let best = null;
+      let bestRepl = Infinity;
+      let bestEnc = 'utf-8';
+      for (const enc of encodings) {
+        try {
+          const td = new TextDecoder(enc);
+          const text = td.decode(uint8);
+          const repl = (text.match(/\ufffd/g) || []).length;
+          // Prefer fewer replacement characters
+          if (repl < bestRepl) {
+            bestRepl = repl;
+            best = text;
+            bestEnc = enc;
+          }
+          // If no replacement chars, we can stop early
+          if (repl === 0) break;
+        } catch (e) {
+          console.warn(`Decoding with ${enc} failed:`, e);
+        }
+      }
+      if (!best) {
+        // fallback to UTF-8 decode
+        try { best = new TextDecoder('utf-8').decode(uint8); bestEnc = 'utf-8'; }
+        catch (e) { best = ''; }
+      }
+      console.log(`🔤 decodeUint8Array: selected encoding ${bestEnc} (replacement chars: ${bestRepl})`);
+      return best;
+    }
+
     // Load spieler.csv from cache first, or prompt user to upload if not cached
     async function promptLoadSpielerCsvFile() {
       try {
@@ -613,8 +816,10 @@
             const zip = await JSZip.loadAsync(cached.zipBuffer);
             const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
             if (fileEntry) {
-              const text = await zip.files[fileEntry].async('text');
-              console.log('Loaded spieler.csv from cache');
+              // decode with multiple encodings to handle corrupted/legacy encodings
+              const uint8 = await zip.files[fileEntry].async('uint8array');
+              const text = await decodeUint8Array(uint8);
+              console.log('Loaded spieler.csv from cache (decoded)');
               return text;
             }
           } catch (e) {
@@ -654,7 +859,8 @@
                 const zip = await JSZip.loadAsync(ab);
                 const fileEntry = Object.keys(zip.files).find(f => /spieler\.csv$/i.test(f));
                 if (!fileEntry) throw new Error('spieler.csv not found inside selected ZIP');
-                const text = await zip.files[fileEntry].async('text');
+                const uint8 = await zip.files[fileEntry].async('uint8array');
+                const text = await decodeUint8Array(uint8);
                 saveCachedSpielerCsv(ab);
                 document.body.removeChild(input);
                 resolve(text);
@@ -758,11 +964,11 @@
         displaySnapshotDate();
         
         const prev = loadPreviousInput();
-        // If there are previous players, load CSV data first so refreshPkzTable can display full player info
+        // If there are previous players, load CSV data first so updatePkzTable can display full player info
         if (prev) {
           await loadSpielerCsv();
-          document.getElementById('pkz').value = prev;
-          refreshPkzTable(); // keep table in sync
+          pkzInput().value = prev;
+          updateAllVisualizations(); // trigger all visualization updates from source of truth
         }
         // restore saved age-adjust checkbox state
         const cb = document.getElementById('ageAdjustCheckbox');
@@ -893,15 +1099,6 @@
       if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
 
       const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-      const playerSection = document.createElement('div');
-      playerSection.className = 'player-section';
-      const loadingH2 = document.createElement('h2');
-      loadingH2.textContent = `Spieler ${pkz}`;
-      const loadingP = document.createElement('p');
-      loadingP.textContent = 'Lade Daten...';
-      playerSection.appendChild(loadingH2);
-      playerSection.appendChild(loadingP);
-      document.getElementById('playersContainer').appendChild(playerSection);
 
       try {
         const response = await corsFetch(targetUrl);
@@ -958,17 +1155,6 @@
         const headers = rows[headerIndex] || [];
         const dataRows = rows.slice(headerIndex + 1); // keep all data rows
 
-        if (dataRows.length === 0) {
-          playerSection.innerHTML = '';
-          const h = document.createElement('h2');
-          h.textContent = playerTitle;
-          const p = document.createElement('p');
-          p.textContent = 'Keine Datenzeilen gefunden.';
-          playerSection.appendChild(h);
-          playerSection.appendChild(p);
-          return null;
-        }
-
         // ✅ Case-insensitive match for DWZneu column
         const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
 
@@ -1022,39 +1208,13 @@
           }
         }
 
-        // ✅ Build table
-        const table = document.createElement('table');
-        const thead = document.createElement('thead');
-        const tbody = document.createElement('tbody');
-
-        const headerRow = document.createElement('tr');
-        headers.forEach(h => {
-          const th = document.createElement('th');
-          th.textContent = (h || '').trim();
-          headerRow.appendChild(th);
-        });
-        const thDate = document.createElement('th');
-        thDate.textContent = 'Turnierdatum';
-        headerRow.appendChild(thDate);
-        thead.appendChild(headerRow);
-
+        // ✅ Extract chart points from data rows (table display removed, graph only)
         const chartPoints = [];
 
         dataRows.forEach((row, i) => {
-          const tr = document.createElement('tr');
-          (row || []).forEach(cell => {
-            const td = document.createElement('td');
-            td.textContent = (cell || '').trim();
-            tr.appendChild(td);
-          });
-
           // if dateMap has no key for this index it means we did not fetch that tournament (months limiting)
           const hasFetched = Object.prototype.hasOwnProperty.call(dateMap, i);
           const dateStr = hasFetched ? dateMap[i] : undefined;
-          const dateTd = document.createElement('td');
-          dateTd.textContent = dateStr === undefined ? 'Nicht geladen' : (dateStr || 'Unbekannt');
-          tr.appendChild(dateTd);
-          tbody.appendChild(tr);
 
           const dwzValue = dwzIndex >= 0 && (row && row[dwzIndex]) ? parseInt((row[dwzIndex] || '').trim(), 10) : NaN;
           const dateObj = parseDateString(dateStr || '');
@@ -1062,15 +1222,6 @@
             chartPoints.push({ x: dateObj, y: dwzValue });
           }
         });
-
-        table.appendChild(thead);
-        table.appendChild(tbody);
-        // Avoid inserting untrusted HTML into innerHTML; use textContent instead
-        playerSection.innerHTML = '';
-        const h2 = document.createElement('h2');
-        h2.textContent = playerTitle;
-        playerSection.appendChild(h2);
-        playerSection.appendChild(table);
 
         chartPoints.sort((a, b) => a.x - b.x);
 
@@ -1119,30 +1270,14 @@
           
           // Look up names in CSV
           for (const n of names) {
-            const key = normalizeSpielerName(n);
-            let playerInfo = csvMap.get(key);
-            let id = playerInfo ? (playerInfo.id || '') : '';
+            console.log(`🔍 Resolving name: "${n}"`);
+            const id = findPlayerIdByName(n, csvMap);
             
-            // If exact match failed, try fuzzy matching with regex (handles corrupted umlauts)
-            if (!id) {
-              console.log(`No exact match for name in CSV: ${n}`);
-              const fuzzyPattern = createUmlautFuzzyPattern(n);
-              if (fuzzyPattern) {
-                // Search through all map entries for a match
-                for (const [mapKey, mapInfo] of csvMap.entries()) {
-                  if (fuzzyPattern.test(mapKey)) {
-                    id = mapInfo && mapInfo.id ? mapInfo.id : '';
-                    playerInfo = mapInfo;
-                    break;
-                  }
-                }
-              }
-            }
-            
-            if (id && playerInfo) {
+            if (id) {
               mapped.push(id);
+              console.log(`  ✓ Added to ID list: ${id}\n`);
             } else {
-              console.log(`Name not found in CSV: ${n}`);
+              console.warn(`  ✗ Name could NOT be resolved to ID: "${n}"\n`);
               notFound.push(n);
             }
           }
@@ -1152,39 +1287,30 @@
           notFound.push(...names);
         }
         
-        // Optionally update the pkzInput field
+        // Optionally update the source of truth (pkz input) using centralized state management
         if (updateInput) {
-          const pkzInput = document.getElementById('pkz');
-          if (!pkzInput) {
-            console.warn(`Could not find table of players on the page to update.`);
-            return { mapped, notFound };
+          // ⚠️ IMPORTANT: Only add successfully MAPPED IDs. Do NOT add unresolved names.
+          // This ensures the ID list contains only valid player IDs, not random strings.
+          let idsToSet = mapped; // Only successfully resolved IDs
+          
+          if (notFound.length > 0) {
+            console.warn(`⚠️  ${notFound.length} ${contextName} name(s) could NOT be resolved to valid IDs:`, notFound);
+            console.warn(`  These will NOT be added to the player list (visualization is independent of unresolved names).`);
           }
-
-          if (mapped.length > 0 && notFound.length === 0) {
-            // all mapped -> populate with IDs
-            pkzInput.value = mapped.join(',');
-          } else if (mapped.length > 0 && notFound.length > 0) {
-            // mixed -> combine mapped IDs plus original names for those not found
-            pkzInput.value = mapped.concat(notFound).join(',');
-            console.warn(`Some ${contextName} names could not be resolved to IDs:`, notFound);
-          } else {
-            // none mapped -> keep original behaviour
-            pkzInput.value = names.join(',');
-            console.warn(`No ${contextName} names could be resolved to IDs. See console for details.`);
+          
+          if (idsToSet.length === 0) {
+            console.warn(`✗ No ${contextName} names could be resolved to IDs. Player list unchanged.`);
           }
-          // refresh visible table
-          refreshPkzTable();
+          
+          // Update the centralized source of truth (this will trigger updateAllVisualizations)
+          setPlayerIds(idsToSet);
         }
         
         return { mapped, notFound };
       } catch (err) {
         console.error(`Error converting ${contextName} names to IDs:`, err);
         if (updateInput) {
-          const pkzInput = document.getElementById('pkz');
-          if (pkzInput) {
-            pkzInput.value = names.join(',');
-            refreshPkzTable();
-          }
+          console.warn(`Due to error, NOT modifying player list.`);
         }
         return { mapped: [], notFound: names };
       }
@@ -1348,82 +1474,13 @@
     })();
 
     // ---------------------------
-    // New: render non-editable PKZ table and keep it in sync with hidden #pkz
-    // ---------------------------
-    function refreshPkzTable() {
-      const pkzInput = document.getElementById('pkz');
-      const tbl = document.getElementById('pkzTable');
-      if (!pkzInput || !tbl) return;
-      const val = (pkzInput.value || '').trim();
-      const ids = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
-      const tbody = tbl.querySelector('tbody');
-      tbody.innerHTML = '';
-      if (ids.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="color:#666; padding:8px;">Keine Spieler hinzugefügt.</td></tr>';
-        return;
-      }
-      ids.forEach(id => {
-        const tr = document.createElement('tr');
-        const tdId = document.createElement('td');
-        tdId.textContent = id;
-        tdId.style.padding = '6px';
-        tr.appendChild(tdId);
-        
-        // Populate player information from spielerIdToDataMap
-        const playerData = spielerIdToDataMap ? spielerIdToDataMap.get(id) : null;
-        
-        const tdVereIn = document.createElement('td');
-        tdVereIn.textContent = playerData && playerData.vereinId ? playerData.vereinId : '';
-        tdVereIn.style.padding = '6px';
-        tr.appendChild(tdVereIn);
-        
-        const tdName = document.createElement('td');
-        tdName.textContent = playerData && playerData.name ? playerData.name : '';
-        tdName.style.padding = '6px';
-        tr.appendChild(tdName);
-        
-        const tdYoB = document.createElement('td');
-        tdYoB.textContent = playerData && playerData.birthYear ? playerData.birthYear : '';
-        tdYoB.style.padding = '6px';
-        tr.appendChild(tdYoB);
-        
-        const tdGender = document.createElement('td');
-        tdGender.textContent = playerData && playerData.gender ? playerData.gender : '';
-        tdGender.style.padding = '6px';
-        tr.appendChild(tdGender);
-        
-        const tdDWZ = document.createElement('td');
-        tdDWZ.textContent = playerData && playerData.dwzValue ? playerData.dwzValue : '';
-        tdDWZ.style.padding = '6px';
-        tr.appendChild(tdDWZ);
-        
-        const tdFideElo = document.createElement('td');
-        tdFideElo.textContent = playerData && playerData.fideElo ? playerData.fideElo : '';
-        tdFideElo.style.padding = '6px';
-        tr.appendChild(tdFideElo);
-        
-        const tdFideCountry = document.createElement('td');
-        tdFideCountry.textContent = playerData && playerData.fideCountry ? playerData.fideCountry : '';
-        tdFideCountry.style.padding = '6px';
-        tr.appendChild(tdFideCountry);
-        
-        tbody.appendChild(tr);
-      });
-    }
-
-    // ---------------------------
-    // New: Clear all button handler
+    // Clear all button handler
     // ---------------------------
     (function () {
       const btn = document.getElementById('clearAllBtn');
       if (!btn) return;
       btn.addEventListener('click', () => {
-        const pkz = document.getElementById('pkz');
-        if (pkz) {
-          pkz.value = '';
-          refreshPkzTable();
-          savePreviousInput('');
-        }
+        clearPlayerIds();
         // clear player UI and chart/toggles
         const playersContainer = document.getElementById('playersContainer');
         if (playersContainer) playersContainer.innerHTML = '';
@@ -1875,11 +1932,12 @@
       });
 
       searchBtn.addEventListener('click', async () => {
-        const searchName = (nameInput.value || '').trim().toLowerCase();
+        const searchName = normalizeSpielerName(nameInput.value || '');
         if (!searchName) {
           alert('Bitte einen Namen eingeben.');
           return;
         }
+        console.log('Search name:', searchName);
         
         resultsDiv.innerHTML = '<div style="text-align:center; color:#666; padding:20px;">Searching...</div>';
         confirmBtn.disabled = true;
@@ -1892,36 +1950,17 @@
           const matches = [];
           
           // Search for names that contain ALL words from the search input
-          const hasUmlaut = /[äöüÄÖÜß]/.test(searchName);
-          if (!hasUmlaut) {
-            console.log('Regular search with words', searchWords);
-            for (const [normalizedName, playerInfo] of csvMap.entries()) {
-              const allWordsPresent = searchWords.every(word => normalizedName.includes(word));
-              if (allWordsPresent) {
-                matches.push({
-                  pkz: playerInfo.id,
-                  normalizedName,
-                  birthYear: playerInfo.birthYear,
-                  currentDWZ: playerInfo.dwzValue
-                });
-                if (matches.length >= 20) break; // Limit to 20 matches
-              }
-            }
-          } else {
-            // Also try fuzzy matching with umlauts if no exact matches found
-            const fuzzyPatterns = searchWords.map(w => createUmlautFuzzyPattern(w));
-            console.log('Fuzzy search with patterns:', fuzzyPatterns);
-            // Search through all map keys for a match
-            for (const [normalizedName, playerInfo] of csvMap.entries()) {
-              if (fuzzyPatterns.every(p => p.test(normalizedName))) {
-                matches.push({
-                  pkz: playerInfo.id,
-                  normalizedName,
-                  birthYear: playerInfo.birthYear,
-                  currentDWZ: playerInfo.dwzValue
-                });
-                if (matches.length >= 20) break; // Limit to 20 matches
-              }
+          console.log('Regular search with words', searchWords);
+          for (const [normalizedName, playerInfo] of csvMap.entries()) {
+            const allWordsPresent = searchWords.every(word => normalizedName.includes(word));
+            if (allWordsPresent) {
+              matches.push({
+                pkz: playerInfo.id,
+                normalizedName,
+                birthYear: playerInfo.birthYear,
+                currentDWZ: playerInfo.dwzValue
+              });
+              if (matches.length >= 20) break; // Limit to 20 matches
             }
           }
           console.log('Found players:', matches.length);
@@ -1974,19 +2013,8 @@
           return;
         }
         
-        // Add player ID to the pkz input field
-        const pkzInput = document.getElementById('pkz');
-        if (!pkzInput) {
-          alert('Spieler-IDs Eingabefeld nicht gefunden.');
-          return;
-        }
-        
-        const currentValue = (pkzInput.value || '').trim();
-        const currentIds = currentValue ? currentValue.split(',').map(id => id.trim()).filter(Boolean) : [];
-        if (!currentIds.includes(selectedPlayerId)) {
-          currentIds.push(selectedPlayerId);
-          pkzInput.value = currentIds.join(',');
-          refreshPkzTable();
+        if (selectedPlayerId) {
+          addPlayerIds([selectedPlayerId]);
         }
         
         // Close modal
