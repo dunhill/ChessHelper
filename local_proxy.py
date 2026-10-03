@@ -1,6 +1,7 @@
 from flask import Flask, request, Response, jsonify
 import requests
 import os
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 
@@ -27,6 +28,63 @@ def proxy():
     headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
 
     return Response(resp.content, status=resp.status_code, headers=headers)
+
+
+@app.route('/rendered-top-players')
+def rendered_top_players():
+    url = request.args.get('url', '')
+    parsed_url = urlparse(url)
+    if (
+        parsed_url.scheme != 'https'
+        or parsed_url.netloc != 'www.schachbund.de'
+        or not parsed_url.path.startswith('/dwz-verbaende/')
+        or not parsed_url.path.endswith('.html')
+    ):
+        response = jsonify({
+            'error': 'invalid_url',
+            'details': 'Only schachbund.de DWZ association pages are supported.'
+        })
+        response.status_code = 400
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    try:
+        from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    except ImportError:
+        response = jsonify({
+            'error': 'playwright_not_installed',
+            'details': 'Install Playwright and Chromium: pip install playwright && python -m playwright install chromium'
+        })
+        response.status_code = 503
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                page.wait_for_selector('div.table_responsiv table', timeout=30000)
+                names = page.locator('div.table_responsiv table td.col_2').all_text_contents()
+                names = [name.strip() for name in names if name.strip()]
+                if not names:
+                    response = jsonify({
+                        'error': 'no_names',
+                        'details': 'The rendered table contained no player names.'
+                    })
+                    response.status_code = 502
+                else:
+                    response = jsonify({'names': names})
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response
+            finally:
+                browser.close()
+    except PlaywrightError as error:
+        response = jsonify({'error': 'render_failed', 'details': str(error)})
+        response.status_code = 502
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
 
 @app.route('/health')

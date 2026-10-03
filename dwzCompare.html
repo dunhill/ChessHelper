@@ -176,7 +176,7 @@
   <div style="margin-bottom:16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
     <span style="font-weight:600;">DWZ Datenbank:</span>
     <span style="font-size:14px;">Date: <span id="dbSnapshotDate" style="font-weight:600; color:#0077cc;">Wird geladen...</span></span>
-    <a id="downloadDbLink" href="https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip" target="_blank" style="text-decoration:underline; font-size:0.95rem; color:#0077cc;">(1) Download latest ZIP</a>
+    <a id="downloadDbLink" href="https://www.schachbund.de/dwz-archiv-downloads-dsb.html?file=files/wertungsportal/downloads/2026/csv/LV-0-csv_20261003.zip" target="_blank" style="text-decoration:underline; font-size:0.95rem; color:#0077cc;">(1) Download latest ZIP</a>
     <a id="uploadDbBtn" type="button" style="background:none; border:none; text-decoration:underline; font-size:0.95rem; color:#0077cc; cursor:pointer; padding:0; font-family:inherit;">(2) Upload ZIP</a>
   </div>
 
@@ -445,7 +445,7 @@
       
       // Filter out any non-numeric IDs (only show valid player IDs)
       const validIds = ids.filter(id => {
-        const isValid = /^\d+$/.test(id); // Player IDs should be purely numeric
+        const isValid = /^NU\d+$/.test(id); // Player IDs should be purely numeric
         if (!isValid) {
           console.warn(`⚠️  Skipping invalid player ID in visualization: "${id}" (not numeric)`);
         }
@@ -696,7 +696,6 @@
 
     // Helper: cache keys and ZIP source URL
     const SPIELER_CSV_CACHE_KEY = 'ch_spieler_csv_cache_v1';
-    const SPIELER_ZIP_URL = 'https://dwz.svw.info/services/files/export/csv/LV-0-csv_v2.zip';
     const SPIELER_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
     // Extract snapshot date from readme.txt in the ZIP
@@ -1620,32 +1619,37 @@
           if (maxAge) params.push(`age_to=${encodeURIComponent(maxAge)}`);
           if (germanOnly) params.push(`german=1`);
 
-          const base = `https://www.schachbund.de/verband/${encodeURIComponent(land)}.html`;
+          const base = `https://www.schachbund.de/dwz-verbaende/${encodeURIComponent(land)}.html`;
           const url = params.length ? `${base}?${params.join('&')}` : base;
 
           try {
-            const resp = await corsFetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const html = await resp.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-
-            const table = doc.getElementById('dewisTable');
-            if (!table) {
-              alert('Keine Spieler-Tabelle (dewisTable) gefunden.');
-              overlay.style.display = 'none';
-              if (addTopPlayersLink) addTopPlayersLink.focus();
-              return;
+            let names = [];
+            try {
+              const resp = await corsFetch(url);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              const html = await resp.text();
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(html, 'text/html');
+              const table = doc.querySelector('div.table_responsiv table');
+              if (table) {
+                names = Array.from(table.querySelectorAll('td.col_2'))
+                  .map(cell => (cell.textContent || '').trim())
+                  .filter(Boolean);
+              }
+            } catch (err) {
+              console.warn('Raw DWZ page fetch failed; trying local Playwright renderer.', err);
             }
 
-            const rows = Array.from(table.querySelectorAll('tr'));
-            const names = [];
-            for (const row of rows) {
-              const cell = row.querySelector('td.col_2');
-              if (!cell) continue;
-              // player name is directly in the .col_2 cell
-              const name = (cell.textContent || '').trim();
-              if (name) names.push(name);
+            if (names.length === 0) {
+              const renderedResponse = await fetch(
+                `http://localhost:5000/rendered-top-players?url=${encodeURIComponent(url)}`
+              );
+              const renderedResult = await renderedResponse.json();
+              if (!renderedResponse.ok) {
+                const details = renderedResult.details || renderedResult.error || `HTTP ${renderedResponse.status}`;
+                throw new Error(`Headless browser could not load the player table: ${details}`);
+              }
+              names = renderedResult.names || [];
             }
 
             // print fetched player names to the browser console (one per line + summary)
@@ -1653,7 +1657,7 @@
               console.log(`Top players fetched (${names.length}):`);
               names.forEach((n, i) => console.log(`${i + 1}. ${n}`));
             } else {
-              console.log('No player names found in dewisTable rows.');
+              throw new Error('No player names found in the rendered DWZ table.');
             }
 
             if (names.length === 0) {
@@ -1667,7 +1671,7 @@
             }
           } catch (err) {
             console.error('Fehler beim Laden der Topliste:', err);
-            alert('Fehler beim Laden der Topliste. Details in Konsole.');
+            alert(`Fehler beim Laden der Topliste: ${err.message}`);
           } finally {
             overlay.style.display = 'none';
             if (addTopPlayersLink) addTopPlayersLink.focus();
