@@ -1,9 +1,23 @@
 from flask import Flask, request, Response, jsonify
 import requests
 import os
+import re
 from urllib.parse import urlparse
 
 app = Flask(__name__)
+PLAYER_PROFILE_DIR = os.environ.get(
+    'CHESSHELPER_PLAYWRIGHT_PROFILE',
+    os.path.join(os.path.expanduser('~'), '.chesshelper-playwright')
+)
+
+
+def valid_player_id(player_id):
+    return re.fullmatch(r'NU\d+', player_id or '') is not None
+
+
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 
 @app.route('/proxy')
@@ -87,6 +101,104 @@ def rendered_top_players():
         return response
 
 
+@app.route('/dwz-login')
+def dwz_login():
+    player_id = request.args.get('pkz', 'NU4174736').strip()
+    if not valid_player_id(player_id):
+        return 'Invalid player ID. Expected NU followed by digits.', 400
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return 'Install Playwright and Chromium before signing in.', 503
+
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            PLAYER_PROFILE_DIR,
+            headless=False
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(f'https://www.schachbund.de/dwz-spieler/{player_id}.html', timeout=45000)
+        page.wait_for_event('close')
+        context.close()
+
+    return 'Browser closed. The local DWZ session has been saved.'
+
+
+@app.route('/rendered-player')
+def rendered_player():
+    player_id = request.args.get('pkz', '').strip()
+    if not valid_player_id(player_id):
+        return add_cors_headers(jsonify({
+            'error': 'invalid_player_id',
+            'details': 'Player ID must use the NU followed by digits format.'
+        })), 400
+
+    try:
+        from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    except ImportError:
+        return add_cors_headers(jsonify({
+            'error': 'playwright_not_installed',
+            'details': 'Install Playwright and Chromium: pip install playwright && python -m playwright install chromium'
+        })), 503
+
+    try:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                PLAYER_PROFILE_DIR,
+                headless=True
+            )
+            try:
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(
+                    f'https://www.schachbund.de/dwz-spieler/{player_id}.html',
+                    wait_until='domcontentloaded',
+                    timeout=45000
+                )
+                try:
+                    page.wait_for_function(
+                        "() => document.querySelector('div.table_responsiv table') || (document.body && document.body.innerText.includes('Sie müssen angemeldet sein'))",
+                        timeout=20000
+                    )
+                except PlaywrightError:
+                    pass
+                body_text = page.locator('body').inner_text()
+                if 'Sie müssen angemeldet sein' in body_text:
+                    return add_cors_headers(jsonify({
+                        'error': 'authentication_required',
+                        'details': 'The DWZ site hides player details until you sign in. Open http://localhost:5000/dwz-login once, sign in, then close that browser window.'
+                    })), 401
+
+                tables = page.locator('div.table_responsiv table').evaluate_all(
+                    "tables => tables.map(table => Array.from(table.querySelectorAll('tr')).map(row => Array.from(row.querySelectorAll('th, td')).map(cell => (cell.innerText || '').trim())))"
+                )
+                tables = [table for table in tables if table]
+                if not tables:
+                    return add_cors_headers(jsonify({
+                        'error': 'tournament_table_not_found',
+                        'details': 'The signed-in player page did not contain a div.table_responsiv table.'
+                    })), 502
+
+                title = page.title()
+                player_name = title
+                if title.startswith('DWZ-Karteikarte '):
+                    player_name = title[len('DWZ-Karteikarte '):].split(' - Deutscher Schachbund')[0].strip()
+
+                return add_cors_headers(jsonify({
+                    'playerId': player_id,
+                    'playerName': player_name,
+                    'tables': tables,
+                    'pageText': body_text
+                }))
+            finally:
+                context.close()
+    except PlaywrightError as error:
+        return add_cors_headers(jsonify({
+            'error': 'render_failed',
+            'details': str(error)
+        })), 502
+
+
 @app.route('/health')
 def health():
     return 'ok'
@@ -94,4 +206,4 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '5000'))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='127.0.0.1', port=port)

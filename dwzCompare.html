@@ -1085,10 +1085,65 @@
     }
 
     function parseDateString(dateStr) {
-      const parts = dateStr.split('.');
-      if (parts.length !== 3) return null;
-      const [day, month, year] = parts.map(x => parseInt(x, 10));
-      return new Date(year, month - 1, day);
+      const match = (dateStr || '').match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (!match) return null;
+      const [, day, month, year] = match;
+      return new Date(Number(year), Number(month) - 1, Number(day));
+    }
+
+    async function fetchRenderedPlayerProfile(pkz) {
+      const response = await fetch(
+        `http://localhost:5000/rendered-player?pkz=${encodeURIComponent(pkz)}`
+      );
+      const profile = await response.json();
+      if (!response.ok) {
+        throw new Error(profile.details || profile.error || `HTTP ${response.status}`);
+      }
+      return profile;
+    }
+
+    function getPlayerProfileRatings(profile) {
+      const table = (profile.tables || []).find(rows => rows.some(row =>
+        row.some(cell => /turnier|datum|dwz|elo/i.test(cell))
+      ));
+      if (!table) throw new Error('Keine Turnier-Tabelle im Spielerprofil gefunden.');
+
+      const headerIndex = table.findIndex(row =>
+        row.some(cell => /turnier|datum|dwz|elo/i.test(cell))
+      );
+      const headers = table[headerIndex].map(value => value.trim().toLowerCase());
+      const dataRows = table.slice(headerIndex + 1).filter(row => row.some(Boolean));
+      const dateIndex = headers.findIndex(header => /datum|date/.test(header));
+      const tournamentIndex = headers.findIndex(header => /turniercode|turnier.?nr|code/.test(header));
+      const dwzIndex = headers.findIndex(header => /dwz/.test(header) && /neu|nach|aktuell/.test(header));
+      const fallbackDwzIndex = dwzIndex >= 0 ? dwzIndex : headers.findIndex(header => /^dwz$/.test(header));
+      const eloIndex = headers.findIndex(header => /elo/.test(header) && !/alt|vorher/.test(header));
+      if (fallbackDwzIndex < 0) throw new Error('DWZ-Spalte in der Turnier-Tabelle nicht gefunden.');
+
+      const readRating = value => {
+        const digits = (value || '').replace(/[^\d]/g, '');
+        return digits ? Number(digits) : null;
+      };
+      const lastValue = index => {
+        if (index < 0) return null;
+        for (let i = dataRows.length - 1; i >= 0; i--) {
+          const value = readRating(dataRows[i][index]);
+          if (value !== null) return value;
+        }
+        return null;
+      };
+      const birthYearMatch = (profile.pageText || '').match(/(?:geburtsjahr|geboren|geb\.)\D{0,20}(\d{4})/i);
+
+      return {
+        playerName: profile.playerName || `Spieler ${profile.playerId}`,
+        birthYear: birthYearMatch ? birthYearMatch[1] : null,
+        currentDWZ: lastValue(fallbackDwzIndex),
+        currentElo: lastValue(eloIndex),
+        dataRows,
+        dateIndex,
+        tournamentIndex,
+        dwzIndex: fallbackDwzIndex
+      };
     }
 
     // now accepts cutoffDate: null = load all tournaments; Date = cutoff to stop fetching older tournaments
@@ -1097,130 +1152,31 @@
       if (!inMemoryTournamentCache) inMemoryTournamentCache = loadTournamentCache();
       if (!inMemoryPkzYearCache) inMemoryPkzYearCache = loadPkzYearCache();
 
-      const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
+      let playerTitle = `Spieler ${pkz}`;
 
       try {
-        const response = await corsFetch(targetUrl);
-        if (!response.ok) throw new Error(`HTTP-Fehler: ${response.status}`);
-        const csv = await response.text();
-        const rows = csv.trim().split('\n').map(r => r.split('|'));
+        const profile = await fetchRenderedPlayerProfile(pkz);
+        const playerData = getPlayerProfileRatings(profile);
+        const playerName = playerData.playerName;
+        const fideYear = playerData.birthYear || inMemoryPkzYearCache[pkz] || null;
+        playerTitle = playerName + (fideYear ? ` - geb. ${fideYear}` : '');
+        inMemoryPkzYearCache[pkz] = fideYear;
 
-        // ✅ Get player's name from second row, third column
-        const playerName = rows[1]?.[2]?.trim() || `Spieler ${pkz}`;
-        // FIDE ID is in row 2, column 7 (index 6). Extract the digit sequence (variable length).
-        const fideRaw = rows[1]?.[6]?.trim();
-        const fideMatch = fideRaw ? fideRaw.match(/\d+/) : null;
-        const fideId = fideMatch ? fideMatch[0] : '';
-
-        // Try to load year of birth from pkz->year cache first.
-        let fideYear = null;
-        const pkzKey = (pkz || '').toString().trim();
-        if (pkzKey && Object.prototype.hasOwnProperty.call(inMemoryPkzYearCache, pkzKey)) {
-          fideYear = inMemoryPkzYearCache[pkzKey]; // may be null
-        } else if (fideId) {
-          // not cached for this pkz -> fetch via FIDE id and store mapping pkz -> year
-          try {
-            fideYear = await fetchFideBirthYear(fideId);
-          } catch (e) {
-            fideYear = null;
-          }
-          // cache mapping (store even if null to avoid re-fetch)
-          if (pkzKey) {
-            inMemoryPkzYearCache[pkzKey] = fideYear === undefined ? null : fideYear;
-          }
-        }
-
-        // include FIDE id and birth year (if available) in the displayed title
-        const playerTitle = playerName
-          + (fideId ? ` (FIDE ${fideId})` : '')
-          + (fideYear ? ` - geb. ${fideYear}` : '');
-
-        // ✅ Dynamically find header row by "turniercode"
-        const headerIndex = rows.findIndex(
-          r => r[0] && r[0].trim().toLowerCase() === 'turniercode'
-        );
-        if (headerIndex === -1) {
-          playerSection.innerHTML = '';
-          const h = document.createElement('h2');
-          h.textContent = playerTitle;
-          const p = document.createElement('p');
-          p.style.color = 'red';
-          p.textContent = 'Keine Kopfzeile ("turniercode") gefunden.';
-          playerSection.appendChild(h);
-          playerSection.appendChild(p);
-          return null;
-        }
-
-        const headers = rows[headerIndex] || [];
-        const dataRows = rows.slice(headerIndex + 1); // keep all data rows
-
-        // ✅ Case-insensitive match for DWZneu column
-        const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
-
-        // ✅ Collect tournament codes
-        const tournaments = dataRows.map(r => r[0]?.trim()).filter(Boolean);
-
-        const dateMap = {}; // map original dataRows index -> date string (or null)
-
-        if (!cutoffDate) {
-          // load all tournament dates in parallel (existing behavior)
-          const dateResults = await Promise.allSettled(
-            tournaments.map(code => fetchTournamentDate(code))
-          );
-          // Build list of tournament codes with their original dataRows index so
-          // the dateResults can be mapped back to the correct row even if some
-          // codes are missing/empty.
-          const tournamentsWithIndex = dataRows
-            .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
-            .filter(t => t.code);
-          dateResults.forEach((res, i) => {
-            const info = tournamentsWithIndex[i];
-            if (!info) return;
-            dateMap[info.idx] = res.status === 'fulfilled' ? res.value : null;
-          });
-        } else {
-          // cutoffDate provided -> load from last tournament backwards until we find a date older than cutoffDate
-          // Build list of tournament codes with their original dataRows index
-          const tournamentsWithIndex = dataRows
-            .map((r, idx) => ({ code: (r && r[0]) ? r[0].trim() : '', idx }))
-            .filter(t => t.code);
-
-          // iterate from last to first and fetch sequentially, stop when older than cutoff is reached
-          for (let k = tournamentsWithIndex.length - 1; k >= 0; k--) {
-            const info = tournamentsWithIndex[k];
-            const code = info.code;
-            try {
-              const dateStr = await fetchTournamentDate(code); // may be null
-              dateMap[info.idx] = dateStr;
-              // if we have a valid parsed date and it's older than cutoffDate -> keep it and stop
-              if (dateStr) {
-                const dt = parseDateString(dateStr);
-                if (dt instanceof Date && !isNaN(dt) && dt < cutoffDate) {
-                  break;
-                }
-              }
-              // if dateStr is null/unknown, continue fetching earlier tournaments (we can't decide)
-            } catch (e) {
-              // on error, mark as null and continue
-              dateMap[info.idx] = null;
-            }
-          }
-        }
-
-        // ✅ Extract chart points from data rows (table display removed, graph only)
         const chartPoints = [];
-
-        dataRows.forEach((row, i) => {
-          // if dateMap has no key for this index it means we did not fetch that tournament (months limiting)
-          const hasFetched = Object.prototype.hasOwnProperty.call(dateMap, i);
-          const dateStr = hasFetched ? dateMap[i] : undefined;
-
-          const dwzValue = dwzIndex >= 0 && (row && row[dwzIndex]) ? parseInt((row[dwzIndex] || '').trim(), 10) : NaN;
-          const dateObj = parseDateString(dateStr || '');
-          if (dateObj instanceof Date && !isNaN(dateObj) && !isNaN(dwzValue)) {
+        for (const row of playerData.dataRows) {
+          const tournamentCode = playerData.tournamentIndex >= 0
+            ? (row[playerData.tournamentIndex] || '').trim()
+            : '';
+          let dateStr = playerData.dateIndex >= 0 ? row[playerData.dateIndex] : '';
+          if (!parseDateString(dateStr) && tournamentCode) {
+            dateStr = await fetchTournamentDate(tournamentCode) || '';
+          }
+          const dateObj = parseDateString(dateStr);
+          const dwzValue = Number((row[playerData.dwzIndex] || '').replace(/[^\d]/g, ''));
+          if (dateObj && !Number.isNaN(dateObj.getTime()) && Number.isFinite(dwzValue) && (!cutoffDate || dateObj >= cutoffDate)) {
             chartPoints.push({ x: dateObj, y: dwzValue });
           }
-        });
+        }
 
         chartPoints.sort((a, b) => a.x - b.x);
 
@@ -1232,19 +1188,16 @@
         try { saveTournamentCache(inMemoryTournamentCache); } catch (e) { /* ignore */ }
         try { if (inMemoryPkzYearCache) savePkzYearCache(inMemoryPkzYearCache); } catch (e) { /* ignore */ }
 
-        // return fideYear as well for age-adjustment logic
-        return { pkz, playerName, data: chartPoints, color, fideYear };
+        return { pkz, playerName, data: chartPoints, color, fideYear, currentDWZ: playerData.currentDWZ, currentElo: playerData.currentElo };
 
       } catch (err) {
-        playerSection.innerHTML = '';
-        const h = document.createElement('h2');
-        // If we have the parsed playerName/yob, show it; otherwise fallback to pkz
-        h.textContent = (typeof playerTitle !== 'undefined' && playerTitle) ? playerTitle : `Spieler ${pkz}`;
-        const p = document.createElement('p');
-        p.style.color = 'red';
-        p.textContent = `Fehler: ${err.message}`;
-        playerSection.appendChild(h);
-        playerSection.appendChild(p);
+        const container = document.getElementById('playersContainer');
+        if (container) {
+          const error = document.createElement('p');
+          error.style.color = 'red';
+          error.textContent = `${playerTitle}: ${err.message}`;
+          container.appendChild(error);
+        }
         console.error(err);
         return null;
       }
@@ -1337,7 +1290,12 @@
           if (lastPlayers) renderChartFromPlayers(lastPlayers);
         });
         const txt = document.createElement('span');
-        txt.textContent = p.playerName || (`Spieler ${p.pkz || idx}`);
+        const currentRatings = [
+          p.currentDWZ ? `DWZ ${p.currentDWZ}` : '',
+          p.currentElo ? `Elo ${p.currentElo}` : ''
+        ].filter(Boolean).join(' · ');
+        txt.textContent = (p.playerName || `Spieler ${p.pkz || idx}`)
+          + (currentRatings ? ` (${currentRatings})` : '');
         label.appendChild(cb);
         label.appendChild(txt);
         container.appendChild(label);
@@ -1822,49 +1780,14 @@
       // Function to fetch player DWZ data
       async function fetchPlayerDWZData(pkz) {
         try {
-          const targetUrl = `https://www.schachbund.de/php/dewis/spieler.php?pkz=${encodeURIComponent(pkz)}&format=csv`;
-          const response = await corsFetch(targetUrl);
-          if (!response.ok) return null;
-          const csv = await response.text();
-          const rows = csv.trim().split('\n').map(r => r.split('|'));
-          
-          // Get player name from second row, third column
-          const playerName = rows[1]?.[2]?.trim() || '';
-          // Get birth year from FIDE ID (row 2, column 7)
-          const fideRaw = rows[1]?.[6]?.trim();
-          const fideMatch = fideRaw ? fideRaw.match(/\d+/) : null;
-          const fideId = fideMatch ? fideMatch[0] : '';
-
-          let birthYear = null;
-          if (fideId) {
-            try {
-              birthYear = await fetchFideBirthYear(fideId);
-            } catch (e) {
-              // ignore errors
-            }
-          }
-          
-          // Find DWZneu column index
-          const headerIndex = rows.findIndex(r => r[0] && r[0].trim().toLowerCase() === 'turniercode');
-          if (headerIndex === -1) return null;
-          const headers = rows[headerIndex] || [];
-          const dwzIndex = headers.findIndex(h => h.trim().toLowerCase() === 'dwzneu');
-          
-          // Get latest DWZ (last row with valid DWZ)
-          let currentDWZ = null;
-          for (let i = rows.length - 1; i > headerIndex; i--) {
-            const dwzValue = dwzIndex >= 0 && rows[i] && rows[i][dwzIndex] ? parseInt((rows[i][dwzIndex] || '').trim(), 10) : NaN;
-            if (!isNaN(dwzValue)) {
-              currentDWZ = dwzValue;
-              break;
-            }
-          }
-          
+          const profile = await fetchRenderedPlayerProfile(pkz);
+          const playerData = getPlayerProfileRatings(profile);
           return {
             pkz,
-            name: playerName,
-            birthYear: birthYear,
-            currentDWZ: currentDWZ
+            name: playerData.playerName,
+            birthYear: playerData.birthYear,
+            currentDWZ: playerData.currentDWZ,
+            currentElo: playerData.currentElo
           };
         } catch (err) {
           console.error('Error fetching player DWZ data:', err);
@@ -1886,6 +1809,7 @@
         html += '<th style="padding:6px; text-align:left;">Name</th>';
         html += '<th style="padding:6px; text-align:left;">Birth Year</th>';
         html += '<th style="padding:6px; text-align:left;">Current DWZ</th>';
+        html += '<th style="padding:6px; text-align:left;">Current Elo</th>';
         html += '</tr></thead><tbody>';
         
         results.forEach((result, index) => {
@@ -1895,6 +1819,7 @@
           html += `<td style="padding:6px;">${result.name || '-'}</td>`;
           html += `<td style="padding:6px;">${result.birthYear || '-'}</td>`;
           html += `<td style="padding:6px;">${result.currentDWZ || '-'}</td>`;
+          html += `<td style="padding:6px;">${result.currentElo || '-'}</td>`;
           html += '</tr>';
         });
         
@@ -1962,7 +1887,8 @@
                 pkz: playerInfo.id,
                 normalizedName,
                 birthYear: playerInfo.birthYear,
-                currentDWZ: playerInfo.dwzValue
+                currentDWZ: playerInfo.dwzValue,
+                currentElo: playerInfo.fideElo
               });
               if (matches.length >= 20) break; // Limit to 20 matches
             }
@@ -1979,7 +1905,8 @@
             pkz: match.pkz,
             name: match.normalizedName,
             birthYear: match.birthYear,
-            currentDWZ: match.currentDWZ
+            currentDWZ: match.currentDWZ,
+            currentElo: match.currentElo
           }));
           
           searchResults = results;
