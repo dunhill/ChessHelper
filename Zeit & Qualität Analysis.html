@@ -110,6 +110,18 @@
     .move-stats td .count { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
     .move-stats td .percentage { display: block; margin-top: 2px; color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
     .move-stats .empty-cell { padding: 20px 12px; color: var(--muted); text-align: left; }
+    .move-comparison { min-width: 0; background: var(--surface); padding: 21px 22px 23px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .move-comparison h2 { margin: 0; font: 600 1.08rem/1.3 Georgia, "Times New Roman", serif; }
+    .move-comparison-intro { margin: 7px 0 13px; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+    .move-comparison table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .78rem; }
+    .move-comparison th, .move-comparison td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    .move-comparison th { color: var(--muted); font-size: .69rem; font-weight: 700; }
+    .move-comparison th:first-child, .move-comparison td:first-child { text-align: left; }
+    .move-comparison td .count { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .move-comparison td .percentage { display: block; margin-top: 2px; color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; }
+    .move-comparison .empty-cell { padding: 18px 6px; color: var(--muted); text-align: left; white-space: normal; }
+    .move-comparison-chart { width: 100%; margin-top: 10px; }
+    .move-comparison-chart svg { display: block; width: 100%; height: auto; }
   .clock-comparison { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 20px; }
   .clock-comparison h2 { margin: 0; font: 600 1.2rem Georgia, "Times New Roman", serif; }
   .comparison-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
@@ -169,6 +181,10 @@
           <label class="field-label" for="playerSelect">Spieler</label>
           <select id="playerSelect" disabled><option value="">Zuerst eine PGN-Datei laden</option></select>
           <p class="player-count" id="playerCountText" aria-live="polite">Die Spielerliste wird nach dem Laden erstellt.</p>
+                    <label class="field-label" for="comparePlayerSelect">Compare to player (optional)</label>
+                    <select id="comparePlayerSelect" disabled>
+                      <option value="">No comparison selected</option>
+                    </select>
           <div class="game-controls">
             <div class="game-field">
               <label class="field-label" for="gameSelect">Partie</label>
@@ -188,6 +204,26 @@
             <p class="status" id="status" role="status" aria-live="polite">Lade eine PGN-Datei, um zu beginnen.</p>
           </div>
         </div>
+        <section class="move-comparison" aria-labelledby="moveComparisonTitle">
+          <h2 id="moveComparisonTitle">Move comparison by time</h2>
+          <p class="move-comparison-intro">Each count is followed by its share of that column's total.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Time per move</th>
+                  <th scope="col">PGN total</th>
+                  <th scope="col">Selected player</th>
+                  <th scope="col">Compared player</th>
+                </tr>
+              </thead>
+              <tbody id="moveComparisonBody">
+                <tr><td class="empty-cell" colspan="4">Choose a comparison player to enable this table.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="move-comparison-chart" id="moveComparisonChart" aria-live="polite"></div>
+        </section>
       </section>
 
       <section class="results" aria-label="Analyseergebnis">
@@ -286,6 +322,8 @@
       comparisonChart: document.getElementById('comparisonChart'), comparisonName: document.getElementById('comparisonGameName'),
       comparisonLegend: document.getElementById('comparisonLegend'), comparisonEvaluationChart: document.getElementById('comparisonEvaluationChart'),
         comparisonHoverTooltip: document.getElementById('comparisonHoverTooltip'),
+      comparePlayer: document.getElementById('comparePlayerSelect'), moveComparisonBody: document.getElementById('moveComparisonBody'),
+        moveComparisonChart: document.getElementById('moveComparisonChart'),
       previousComparisonGame: document.getElementById('previousComparisonGame'),
       nextComparisonGame: document.getElementById('nextComparisonGame')
     };
@@ -427,6 +465,14 @@
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'de'));
     }
 
+    function updateComparePlayerOptions() {
+      elements.comparePlayer.replaceChildren(new Option('No comparison selected', ''));
+      playersInGames().forEach(({ name }) => elements.comparePlayer.add(new Option(name, name)));
+      elements.comparePlayer.disabled = games.length === 0;
+      elements.comparePlayer.value = '';
+      renderMoveComparison([], [], []);
+    }
+
     function updatePlayerCount() {
       const playerName = elements.player.value;
       const count = games.filter((game) => game.white === playerName || game.black === playerName).length;
@@ -434,6 +480,7 @@
       elements.playerCountText.textContent = playerName ? `${count} ${count === 1 ? 'Partie' : 'Partien'} mit diesem Spieler in der Datei.` : 'Die Spielerliste wird nach dem Laden erstellt.';
       updateGameOptions();
       updateOpponentClockComparison(true);
+      if (elements.comparePlayer.value && games.length) analyze();
     }
 
     function updateGameOptions() {
@@ -771,6 +818,7 @@
           function collectPlayerMoves(selectedGames, playerName, timeControl) {
       const points = [];
       selectedGames.forEach((game, gameIndex) => {
+        if (game.white !== playerName && game.black !== playerName) return;
         const playsWhite = game.white === playerName;
         let previousEvaluation = game.initialEvaluation;
         let previousPlayerClock = null;
@@ -844,6 +892,138 @@
         return row;
       }));
     }
+
+    function renderMoveComparison(selectedGames, selectedMoves, timeControl) {
+      const comparedPlayer = elements.comparePlayer.value;
+      if (!comparedPlayer || !timeControl) {
+        elements.moveComparisonBody.innerHTML = '<tr><td class="empty-cell" colspan="4">Choose a comparison player to enable this table.</td></tr>';
+        elements.moveComparisonChart.replaceChildren();
+        return;
+      }
+
+      const categories = [
+        { label: '0-10 sec', maximum: 10 },
+        { label: '10-30 sec', maximum: 30 },
+        { label: '30-60 sec', maximum: 60 },
+        { label: '1-3 min', maximum: 180 },
+        { label: '3-10 min', maximum: 600 },
+        { label: '10+ min', maximum: Infinity }
+      ].map((category) => ({ ...category, counts: [0, 0, 0] }));
+      const comparedMoves = collectPlayerMoves(games, comparedPlayer, timeControl);
+      const allPgnMoves = games.flatMap((game) =>
+        Array.from(new Set([game.white, game.black]))
+          .flatMap((playerName) => collectPlayerMoves([game], playerName, timeControl))
+      );
+      const columns = [allPgnMoves, selectedMoves, comparedMoves];
+
+      columns.forEach((moves, columnIndex) => {
+        moves.forEach((move) => {
+          if (move.x < 0) return;
+          const category = categories.find((candidate) => move.x < candidate.maximum);
+          if (category) category.counts[columnIndex] += 1;
+        });
+      });
+
+      const columnTotals = [0, 1, 2].map((columnIndex) =>
+        categories.reduce((total, category) => total + category.counts[columnIndex], 0)
+      );
+      const distributions = [0, 1, 2].map((columnIndex) =>
+        categories.map((category) => columnTotals[columnIndex]
+          ? category.counts[columnIndex] / columnTotals[columnIndex] * 100
+          : 0)
+      );
+
+      elements.moveComparisonBody.replaceChildren(...categories.map((category) => {
+        const row = document.createElement('tr');
+        const label = document.createElement('th');
+        label.scope = 'row';
+        label.textContent = category.label;
+        row.appendChild(label);
+
+        category.counts.forEach((count, columnIndex) => {
+          const cell = document.createElement('td');
+          const countLabel = document.createElement('span');
+          countLabel.className = 'count';
+          countLabel.textContent = String(count);
+          const percentage = document.createElement('span');
+          percentage.className = 'percentage';
+          percentage.textContent = `${columnTotals[columnIndex] ? (count / columnTotals[columnIndex] * 100).toFixed(1) : '0.0'}%`;
+          cell.append(countLabel, percentage);
+          row.appendChild(cell);
+        });
+
+        return row;
+      }));
+      drawMoveComparisonChart(categories, distributions);
+    }
+
+    function drawMoveComparisonChart(categories, distributions) {
+      const width = 760;
+      const height = 300;
+      const margin = { top: 18, right: 18, bottom: 66, left: 52 };
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const maxPercentage = Math.max(0, ...distributions.flat());
+      const yTickStep = maxPercentage <= 20 ? 5 : maxPercentage <= 40 ? 10 : 20;
+      const yAxisMaximum = Math.min(100, Math.max(yTickStep, Math.ceil(maxPercentage / yTickStep) * yTickStep));
+      const x = (index) => margin.left + (index + .5) * plotWidth / categories.length;
+      const y = (value) => margin.top + (yAxisMaximum - value) / yAxisMaximum * plotHeight;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', 'Move time-category distribution for all games and both players');
+      const add = (tag, attributes = {}) => {
+        const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+        svg.appendChild(node);
+        return node;
+      };
+      const labels = [
+        { name: 'PGN total', color: '#202923', values: distributions[0] },
+        { name: elements.player.value, color: '#1c674d', values: distributions[1] },
+        { name: elements.comparePlayer.value, color: '#d26b50', values: distributions[2] }
+      ];
+
+      for (let percentage = 0; percentage <= yAxisMaximum; percentage += yTickStep) {
+        const yPosition = y(percentage);
+        add('line', { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition, stroke: '#e5e9e1' });
+        const label = add('text', { x: margin.left - 9, y: yPosition + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 10 });
+        label.textContent = `${percentage}%`;
+      }
+
+      categories.forEach((category, index) => {
+        const label = add('text', { x: x(index), y: height - margin.bottom + 17, 'text-anchor': 'middle', fill: '#66736c', 'font-size': 10 });
+        label.textContent = category.label;
+      });
+
+      labels.forEach((series) => {
+        const pathData = series.values.map((value, index) => `${index === 0 ? 'M' : 'L'}${x(index)},${y(value)}`).join(' ');
+        add('path', { d: pathData, fill: 'none', stroke: series.color, 'stroke-width': 2.5 });
+        series.values.forEach((value, index) => {
+          const point = add('circle', { cx: x(index), cy: y(value), r: 4, fill: series.color, stroke: '#fffefa', 'stroke-width': 1.2 });
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          title.textContent = `${series.name} · ${categories[index].label} · ${value.toFixed(1)}%`;
+          point.appendChild(title);
+        });
+      });
+
+      elements.moveComparisonChart.replaceChildren(svg);
+      const legend = document.createElement('div');
+      legend.className = 'comparison-legend';
+      labels.forEach((series) => {
+        const item = document.createElement('span');
+        item.className = 'comparison-legend-item';
+        item.style.color = series.color;
+        const line = document.createElement('span');
+        line.className = 'comparison-legend-line';
+        const name = document.createElement('span');
+        name.textContent = series.name;
+        item.append(line, name);
+        legend.appendChild(item);
+      });
+      elements.moveComparisonChart.appendChild(legend);
+    }
+
     function drawChart(points) {
       elements.chart.replaceChildren();
       if (points.length === 0) {
@@ -945,6 +1125,7 @@
       const points = playerMoves.filter((move) => move.y != null);
       elements.selectedGames.textContent = String(selectedGames.length);
       renderMoveStatistics(playerMoves);
+      renderMoveComparison(selectedGames, playerMoves, timeControl);
       elements.selectedMoves.textContent = String(totalMoves);
       elements.plottedMoves.textContent = String(points.length);
       lastPoints = points;
@@ -965,6 +1146,7 @@
         elements.qualifiedGames.textContent = String(games.filter((game) => game.hasClock && game.hasEvaluation).length);
         const players = playersInGames();
         elements.player.replaceChildren(...players.map(({ name, count }) => new Option(`${name} (${count})`, name)));
+        updateComparePlayerOptions();
         elements.player.disabled = players.length === 0;
         elements.game.disabled = players.length === 0;
         elements.analyze.disabled = players.length === 0;
@@ -989,24 +1171,35 @@
         elements.player.disabled = true;
         elements.game.disabled = true;
         elements.analyze.disabled = true;
+        elements.comparePlayer.disabled = true;
+        renderMoveComparison([], [], null);
         elements.fileName.textContent = file.name;
         setStatus(error.message || 'Die PGN-Datei konnte nicht gelesen werden.', true);
       }
     });
 
     elements.player.addEventListener('change', updatePlayerCount);
-        elements.game.addEventListener('change', () => updateOpponentClockComparison(true));
-        elements.previousComparisonGame.addEventListener('click', () => {
-          comparisonPosition = Math.max(0, comparisonPosition - 1);
-          updateOpponentClockComparison();
-        });
-        elements.nextComparisonGame.addEventListener('click', () => {
-          comparisonPosition += 1;
-          updateOpponentClockComparison();
-        });
-        [elements.initialTime, elements.incrementTime, elements.additionalTime].forEach((input) => {
-          input.addEventListener('input', () => updateOpponentClockComparison());
-        });
+    elements.comparePlayer.addEventListener('change', () => {
+      if (elements.player.value) analyze();
+    });
+    elements.game.addEventListener('change', () => {
+      updateOpponentClockComparison(true);
+      if (elements.comparePlayer.value && elements.player.value) analyze();
+    });
+    elements.previousComparisonGame.addEventListener('click', () => {
+      comparisonPosition = Math.max(0, comparisonPosition - 1);
+      updateOpponentClockComparison();
+    });
+    elements.nextComparisonGame.addEventListener('click', () => {
+      comparisonPosition += 1;
+      updateOpponentClockComparison();
+    });
+    [elements.initialTime, elements.incrementTime, elements.additionalTime].forEach((input) => {
+      input.addEventListener('input', () => {
+        updateOpponentClockComparison();
+        if (elements.comparePlayer.value && elements.player.value) analyze();
+      });
+    });
     elements.analyze.addEventListener('click', analyze);
     elements.zoomIn.addEventListener('click', () => {
       zoomLevel = Math.min(32, zoomLevel * 1.25);
