@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zeit &amp; Qualität Analysis</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202923;
+      --muted: #66736c;
+      --paper: #f4f5ef;
+      --surface: #fffefa;
+      --line: #d9dfd6;
+      --green: #1c674d;
+      --green-dark: #164d3b;
+      --lime: #c7df78;
+      --coral: #d26b50;
+      --shadow: 0 12px 34px rgba(32, 41, 35, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background-color: var(--paper);
+      background-image: linear-gradient(rgba(39, 81, 61, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(39, 81, 61, .035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+    }
+
+    main { width: min(1100px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 64px; }
+    .eyebrow { margin: 0 0 8px; color: var(--green); font: 700 .76rem/1.2 "Courier New", monospace; text-transform: uppercase; }
+    h1 { margin: 0; font: 500 clamp(2rem, 5vw, 3.15rem)/1.05 Georgia, "Times New Roman", serif; letter-spacing: 0; }
+    .intro { max-width: 680px; margin: 12px 0 28px; color: var(--muted); line-height: 1.55; }
+
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); margin-bottom: 24px; }
+    .stat { padding: 17px 20px 18px 0; }
+    .stat + .stat { border-left: 1px solid var(--line); padding-left: 20px; }
+    .stat-value { display: block; font: 600 1.7rem/1.2 Georgia, "Times New Roman", serif; font-variant-numeric: tabular-nums; }
+    .stat-label { display: block; margin-top: 5px; color: var(--muted); font-size: .83rem; }
+
+    .workflow { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 28px; align-items: start; }
+    .steps { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .step { background: var(--surface); padding: 21px 22px 23px; }
+    .step-heading { display: flex; align-items: baseline; gap: 10px; margin: 0 0 15px; font: 600 1.08rem/1.3 Georgia, "Times New Roman", serif; }
+    .step-number { color: var(--green); font: 700 .76rem/1 "Courier New", monospace; }
+
+    .file-drop { min-height: 142px; display: grid; align-content: center; justify-items: center; gap: 7px; padding: 18px; border: 1px dashed #94a398; background: #f7f8f2; text-align: center; cursor: pointer; transition: border-color .18s, background .18s; }
+    .file-drop:hover, .file-drop:focus-within { border-color: var(--green); background: #f0f5e8; }
+    .file-drop strong { font: 600 1rem Georgia, "Times New Roman", serif; }
+    .file-drop span { color: var(--muted); font-size: .82rem; }
+    input[type="file"] { max-width: 100%; font: inherit; font-size: .85rem; }
+
+    label.field-label { display: block; margin: 0 0 7px; color: var(--muted); font-size: .78rem; font-weight: 700; }
+    select { width: 100%; min-height: 43px; padding: 9px 36px 9px 11px; border: 1px solid var(--line); border-radius: 0; background: #fff; color: var(--ink); font: inherit; }
+    select:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid rgba(28, 103, 77, .28); outline-offset: 2px; }
+    .player-count { min-height: 19px; margin: 8px 0 0; color: var(--muted); font-size: .82rem; }
+    .game-controls { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(225px, 1fr); gap: 14px; align-items: end; margin-top: 21px; }
+    .game-field { margin-top: 0; min-width: 0; }
+    .time-control { min-width: 0; margin: 0; padding: 0; border: 0; }
+    .time-control legend { margin-bottom: 7px; color: var(--muted); font-size: .78rem; font-weight: 700; }
+    .time-control-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .time-control-fields label { min-width: 0; color: var(--muted); font-size: .68rem; line-height: 1.25; }
+    .time-control-fields input { display: block; width: 100%; min-width: 0; height: 39px; margin-top: 5px; padding: 6px; border: 1px solid var(--line); border-radius: 0; background: #fff; color: var(--ink); font: inherit; font-size: .85rem; }
+    .file-name { min-height: 18px; margin: 10px 0 0; color: var(--green-dark); font-size: .82rem; overflow-wrap: anywhere; }
+
+    .analyze-row { display: flex; align-items: center; gap: 13px; margin-top: 18px; }
+    button { min-height: 44px; padding: 0 21px; border: 0; border-radius: 0; background: var(--green); color: white; font: 700 .9rem "Segoe UI", sans-serif; cursor: pointer; transition: background .18s, transform .18s; }
+    button:hover:not(:disabled) { background: var(--green-dark); transform: translateY(-1px); }
+    button:disabled { background: #aab5ad; cursor: not-allowed; }
+    .status { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.4; }
+    .status.error { color: #a33d2d; }
+
+    .results { min-width: 0; }
+    .result-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+    .result-stats .stat { padding: 14px 10px 14px 0; }
+    .result-stats .stat + .stat { padding-left: 12px; }
+    .result-stats .stat-value { font-size: 1.35rem; }
+    .result-stats .stat-label { font-size: .73rem; }
+    .chart-panel { margin-top: 20px; padding: 18px 18px 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .chart-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin: 0 0 3px; font: 600 1.1rem Georgia, "Times New Roman", serif; }
+    .chart-hint { margin: 0 0 12px; color: var(--muted); font-size: .78rem; }
+    .chart-wrap { position: relative; width: 100%; min-height: 320px; }
+    svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .empty-chart { min-height: 286px; display: grid; place-items: center; padding: 30px; color: var(--muted); text-align: center; line-height: 1.5; }
+    .legend { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 11px; color: var(--muted); font-size: .76rem; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; }
+    .footnote { margin: 13px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+
+    @media (max-width: 760px) {
+      main { width: min(100% - 26px, 560px); padding-top: 27px; }
+      .workflow { grid-template-columns: 1fr; gap: 27px; }
+      .game-controls { grid-template-columns: 1fr; gap: 16px; }
+      .stat { padding-right: 9px; }
+      .stat + .stat { padding-left: 10px; }
+      .stat-value { font-size: 1.4rem; }
+      .stat-label { font-size: .72rem; }
+      .chart-panel { padding: 14px 10px; }
+      .chart-wrap { min-height: 250px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Partie für Partie · Zug für Zug</p>
+    <h1>Zeit &amp; Qualität Analysis</h1>
+    <p class="intro">Vergleiche den Zeitverbrauch eines Spielers mit den Bewertungsänderungen seiner Züge. Die Analyse bleibt vollständig in deinem Browser.</p>
+
+    <section class="summary" aria-label="Dateiübersicht">
+      <div class="stat"><span class="stat-value" id="totalGames">–</span><span class="stat-label">Partien in der PGN-Datei</span></div>
+      <div class="stat"><span class="stat-value" id="qualifiedGames">–</span><span class="stat-label">Partien mit Uhr- und Bewertungsdaten</span></div>
+      <div class="stat"><span class="stat-value" id="playerGameCount">–</span><span class="stat-label">Partien des gewählten Spielers</span></div>
+    </section>
+
+    <div class="workflow">
+      <section class="steps" aria-label="Analyse einrichten">
+        <div class="step">
+          <h2 class="step-heading"><span class="step-number">01</span> PGN-Datei laden</h2>
+          <label class="file-drop" for="pgnFile">
+            <strong>PGN-Datei auswählen</strong>
+            <span>Standard-PGN mit [%clk] und [%eval] Kommentaren</span>
+            <input id="pgnFile" type="file" accept=".pgn,.txt,text/plain,application/x-chess-pgn">
+          </label>
+          <p class="file-name" id="fileName" aria-live="polite"></p>
+        </div>
+        <div class="step">
+          <h2 class="step-heading"><span class="step-number">02</span> Spieler und Partien</h2>
+          <label class="field-label" for="playerSelect">Spieler</label>
+          <select id="playerSelect" disabled><option value="">Zuerst eine PGN-Datei laden</option></select>
+          <p class="player-count" id="playerCountText" aria-live="polite">Die Spielerliste wird nach dem Laden erstellt.</p>
+          <div class="game-controls">
+            <div class="game-field">
+              <label class="field-label" for="gameSelect">Partie</label>
+              <select id="gameSelect" disabled><option value="all">Alle Partien</option></select>
+            </div>
+            <fieldset class="time-control">
+              <legend>Zeitkontrolle</legend>
+              <div class="time-control-fields">
+                <label for="initialTime">Start (Min.)<input id="initialTime" type="number" min="0" step="1" value="90"></label>
+                <label for="incrementTime">Zugabe (Sek.)<input id="incrementTime" type="number" min="0" step="1" value="30"></label>
+                <label for="additionalTime">Nach 40 (Min.)<input id="additionalTime" type="number" min="0" step="1" value="30"></label>
+              </div>
+            </fieldset>
+          </div>
+          <div class="analyze-row">
+            <button id="analyzeButton" type="button" disabled>Analysieren</button>
+            <p class="status" id="status" role="status" aria-live="polite">Lade eine PGN-Datei, um zu beginnen.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="results" aria-label="Analyseergebnis">
+        <div class="result-stats">
+          <div class="stat"><span class="stat-value" id="selectedGameCount">–</span><span class="stat-label">Ausgewählte Partien</span></div>
+          <div class="stat"><span class="stat-value" id="selectedMoveCount">–</span><span class="stat-label">Einzelzüge insgesamt</span></div>
+          <div class="stat"><span class="stat-value" id="plottedMoveCount">–</span><span class="stat-label">Züge im Diagramm</span></div>
+        </div>
+        <div class="chart-panel">
+          <h2 class="chart-heading">Zeitverbrauch &amp; Bewertungsänderung</h2>
+          <p class="chart-hint">Jeder Punkt entspricht einem Zug des gewählten Spielers.</p>
+          <div class="chart-wrap" id="chart" aria-live="polite">
+            <div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>
+          </div>
+          <div class="legend" id="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#858b88"></span>Ohne Symbol</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#d34c42"></span>??</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#df8a36"></span>?</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#3478c8"></span>?!</span>
+          </div>
+          <p class="footnote">X: verbrauchte Zeit in Sekunden, einschließlich Zugabe pro Zug. Der erste Zug verwendet Startzeit + Zugabe − Restzeit. Ein negatives Ergebnis nach dem 40. Zug erhält die Nach-40-Zeit einmalig. Y: Bewertungsänderung aus Sicht des gewählten Spielers; positive Werte sind vorteilhaft.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+
+    const qualityColors = { default: '#858b88', blunder: '#d34c42', mistake: '#df8a36', dubious: '#3478c8' };
+    const elements = {
+      file: document.getElementById('pgnFile'), fileName: document.getElementById('fileName'),
+      totalGames: document.getElementById('totalGames'), qualifiedGames: document.getElementById('qualifiedGames'),
+      playerGameCount: document.getElementById('playerGameCount'), player: document.getElementById('playerSelect'),
+      playerCountText: document.getElementById('playerCountText'), game: document.getElementById('gameSelect'),
+      initialTime: document.getElementById('initialTime'), incrementTime: document.getElementById('incrementTime'),
+      additionalTime: document.getElementById('additionalTime'),
+      analyze: document.getElementById('analyzeButton'), status: document.getElementById('status'),
+      selectedGames: document.getElementById('selectedGameCount'), selectedMoves: document.getElementById('selectedMoveCount'),
+      plottedMoves: document.getElementById('plottedMoveCount'), chart: document.getElementById('chart'), legend: document.getElementById('legend')
+    };
+    let games = [];
+
+    function readTagPairs(block) {
+      const tags = {};
+      const tagPattern = /^\s*\[([A-Za-z0-9_]+)\s+"((?:\\.|[^"])*)"\]\s*$/gm;
+      let match;
+      while ((match = tagPattern.exec(block))) {
+        tags[match[1].toLowerCase()] = match[2].replace(/\\([\\"])/g, '$1');
+      }
+      return tags;
+    }
+
+    function splitPgnGames(text) {
+      const blocks = [];
+      let tags = {};
+      let moveText = [];
+      let seenMoves = false;
+      const finish = () => {
+        if (Object.keys(tags).length || moveText.join('').trim()) blocks.push({ tags, moveText: moveText.join('\n') });
+        tags = {};
+        moveText = [];
+        seenMoves = false;
+      };
+
+      for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+        const header = line.match(/^\s*\[([A-Za-z0-9_]+)\s+"((?:\\.|[^"])*)"\]\s*$/);
+        if (header) {
+          if (seenMoves) finish();
+          const value = header[2].replace(/\\([\\"])/g, '$1');
+          tags[header[1].toLowerCase()] = value;
+        } else if (line.trim()) {
+          seenMoves = true;
+          moveText.push(line);
+        } else if (seenMoves) {
+          moveText.push('');
+        }
+      }
+      finish();
+      return blocks;
+    }
+
+    function parseClock(value) {
+      const parts = value.split(':').map(Number);
+      if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) return null;
+      if (parts.slice(1).some((part) => part >= 60)) return null;
+      return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+    }
+
+    function parseEvaluation(value) {
+      const number = Number(value.split(',')[0]);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function readCommentAnnotations(comment, moves, initial) {
+      const clockMatch = comment.match(/\[%clk\s+([^\]\s]+)\s*\]/i);
+      const evalMatch = comment.match(/\[%eval\s+([^\]\s]+)\s*\]/i);
+      const target = moves[moves.length - 1];
+      if (clockMatch && target) target.clock = parseClock(clockMatch[1]);
+      if (evalMatch) {
+        const evaluation = parseEvaluation(evalMatch[1]);
+        if (target && evaluation != null) target.evaluation = evaluation;
+        else if (!target && evaluation != null) initial.evaluation = evaluation;
+      }
+    }
+
+    function parseMoves(text) {
+      const moves = [];
+      const initial = { evaluation: 0 };
+      let index = 0;
+      let variationDepth = 0;
+
+      while (index < text.length) {
+        const char = text[index];
+        if (char === '{') {
+          const end = text.indexOf('}', index + 1);
+          const close = end < 0 ? text.length : end;
+          if (variationDepth === 0) readCommentAnnotations(text.slice(index + 1, close), moves, initial);
+          index = close + 1;
+          continue;
+        }
+        if (char === ';') {
+          const end = text.indexOf('\n', index + 1);
+          index = end < 0 ? text.length : end + 1;
+          continue;
+        }
+        if (char === '(') { variationDepth += 1; index += 1; continue; }
+        if (char === ')') { variationDepth = Math.max(0, variationDepth - 1); index += 1; continue; }
+        if (/\s/.test(char)) { index += 1; continue; }
+
+        let end = index;
+        while (end < text.length && !/[\s{}();]/.test(text[end])) end += 1;
+        let token = text.slice(index, end);
+        index = end;
+        if (variationDepth > 0 || !token) continue;
+
+        const numbered = token.match(/^\d+\.(?:\.\.)?(.*)$/);
+        if (numbered) {
+          token = numbered[1];
+          if (!token) continue;
+        }
+        if (/^(?:\d+\.(?:\.\.)?|\.\.\.)$/.test(token) || /^(?:1-0|0-1|1\/2-1\/2|\*)$/.test(token) || /^\$\d+$/.test(token)) continue;
+        if (!token) continue;
+
+        moves.push({ san: token, color: moves.length % 2 === 0 ? 'white' : 'black', clock: null, evaluation: null });
+      }
+      return { moves, initial };
+    }
+
+    function parseGame(block, index) {
+      const { moves, initial } = parseMoves(block.moveText);
+      const white = block.tags.white || 'Unknown white';
+      const black = block.tags.black || 'Unknown black';
+      const result = block.tags.result || (block.moveText.match(/(?:1-0|0-1|1\/2-1\/2|\*)\s*$/) || ['*'])[0];
+      return {
+        index, tags: block.tags, moves, initialEvaluation: initial.evaluation,
+        white, black, result, date: block.tags.date || 'Datum unbekannt', event: block.tags.event || 'Ereignis unbekannt',
+        hasClock: moves.some((move) => move.clock != null),
+        hasEvaluation: moves.some((move) => move.evaluation != null)
+      };
+    }
+
+    function formatGame(game) {
+      return `${game.white} - ${game.black}, ${game.result}, ${game.date}, ${game.event}`;
+    }
+
+    function playersInGames() {
+      const appearances = new Map();
+      games.forEach((game) => {
+        for (const name of new Set([game.white, game.black])) appearances.set(name, (appearances.get(name) || 0) + 1);
+      });
+      return Array.from(appearances, ([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'de'));
+    }
+
+    function updatePlayerCount() {
+      const playerName = elements.player.value;
+      const count = games.filter((game) => game.white === playerName || game.black === playerName).length;
+      elements.playerGameCount.textContent = playerName ? String(count) : '–';
+      elements.playerCountText.textContent = playerName ? `${count} ${count === 1 ? 'Partie' : 'Partien'} mit diesem Spieler in der Datei.` : 'Die Spielerliste wird nach dem Laden erstellt.';
+      updateGameOptions();
+    }
+
+    function updateGameOptions() {
+      const playerName = elements.player.value;
+      const current = elements.game.value;
+      const playerGames = games.map((game, index) => ({ game, index })).filter(({ game }) => game.white === playerName || game.black === playerName);
+      elements.game.replaceChildren(new Option('Alle Partien', 'all'));
+      playerGames.forEach(({ game, index }) => elements.game.add(new Option(formatGame(game), String(index))));
+      elements.game.value = playerGames.some(({ index }) => String(index) === current) ? current : 'all';
+    }
+
+    function setStatus(message, isError = false) {
+      elements.status.textContent = message;
+      elements.status.classList.toggle('error', isError);
+    }
+
+    function formatSeconds(value) {
+      const sign = value < 0 ? '−' : '';
+      const absolute = Math.abs(value);
+      const minutes = Math.floor(absolute / 60);
+      const seconds = Math.round(absolute % 60);
+      return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    function collectPoints(selectedGames, playerName, timeControl) {
+      const points = [];
+      selectedGames.forEach((game, gameIndex) => {
+        const playsWhite = game.white === playerName;
+        let previousEvaluation = game.initialEvaluation;
+        let previousPlayerClock = null;
+        let playerMoveNumber = 0;
+        let additionalTimeUsed = false;
+
+        game.moves.forEach((move, moveIndex) => {
+          const evaluationChange = move.evaluation == null ? null : move.evaluation - previousEvaluation;
+          if (move.evaluation != null) previousEvaluation = move.evaluation;
+          if (move.color !== (playsWhite ? 'white' : 'black')) return;
+
+          playerMoveNumber += 1;
+          let spent = null;
+          if (move.clock != null) {
+            spent = playerMoveNumber === 1
+              ? timeControl.initialMinutes * 60 + timeControl.incrementSeconds - move.clock
+              : previousPlayerClock == null ? null : previousPlayerClock - move.clock + timeControl.incrementSeconds;
+            previousPlayerClock = move.clock;
+          }
+          if (spent != null && spent < 0 && playerMoveNumber > 40 && !additionalTimeUsed) {
+            spent += timeControl.additionalMinutes * 60;
+            additionalTimeUsed = true;
+          }
+          if (spent == null || evaluationChange == null) return;
+          const quality = move.san.endsWith('??') ? 'blunder' : move.san.endsWith('?!') ? 'dubious' : move.san.endsWith('?') ? 'mistake' : 'default';
+          points.push({ x: spent, y: playsWhite ? evaluationChange : -evaluationChange, game, gameIndex, moveNumber: Math.floor(moveIndex / 2) + 1, move, color: qualityColors[quality] });
+        });
+      });
+      return points;
+    }
+
+    function drawChart(points) {
+      elements.chart.replaceChildren();
+      if (points.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-chart';
+        empty.textContent = 'Keine Züge mit verwertbarer Uhrzeit und Bewertungsänderung in der Auswahl gefunden.';
+        elements.chart.appendChild(empty);
+        return;
+      }
+
+      const width = 760;
+      const height = 430;
+      const margin = { top: 20, right: 22, bottom: 58, left: 66 };
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const minX = Math.min(0, ...points.map((point) => point.x));
+      const maxX = Math.max(0, ...points.map((point) => point.x));
+      const minY = Math.min(0, ...points.map((point) => point.y));
+      const maxY = Math.max(0, ...points.map((point) => point.y));
+      const xPadding = Math.max(10, (maxX - minX) * .08);
+      const yPadding = Math.max(.1, (maxY - minY) * .1);
+      const xLow = minX - xPadding;
+      const xHigh = maxX + xPadding || 1;
+      const yLow = minY - yPadding;
+      const yHigh = maxY + yPadding || 1;
+      const x = (value) => margin.left + (value - xLow) / (xHigh - xLow) * plotWidth;
+      const y = (value) => margin.top + (yHigh - value) / (yHigh - yLow) * plotHeight;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', 'Streudiagramm für Zeitverbrauch und Bewertungsänderung');
+      const add = (tag, attrs = {}) => {
+        const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+        svg.appendChild(node);
+        return node;
+      };
+
+      const tickCount = 5;
+      for (let index = 0; index <= tickCount; index += 1) {
+        const xValue = xLow + (xHigh - xLow) * index / tickCount;
+        const yValue = yLow + (yHigh - yLow) * index / tickCount;
+        const xPos = x(xValue);
+        const yPos = y(yValue);
+        add('line', { x1: xPos, y1: margin.top, x2: xPos, y2: height - margin.bottom, stroke: '#e5e9e1', 'stroke-width': 1 });
+        add('line', { x1: margin.left, y1: yPos, x2: width - margin.right, y2: yPos, stroke: '#e5e9e1', 'stroke-width': 1 });
+        const xLabel = add('text', { x: xPos, y: height - margin.bottom + 19, 'text-anchor': 'middle', fill: '#66736c', 'font-size': 11, 'font-family': 'Segoe UI, sans-serif' });
+        xLabel.textContent = Math.round(xValue);
+        const yLabel = add('text', { x: margin.left - 10, y: yPos + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11, 'font-family': 'Segoe UI, sans-serif' });
+        yLabel.textContent = yValue.toFixed(1);
+      }
+
+      add('line', { x1: x(0), y1: margin.top, x2: x(0), y2: height - margin.bottom, stroke: '#849189', 'stroke-width': 1.4 });
+      add('line', { x1: margin.left, y1: y(0), x2: width - margin.right, y2: y(0), stroke: '#849189', 'stroke-width': 1.4 });
+      const xTitle = add('text', { x: margin.left + plotWidth / 2, y: height - 10, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-family': 'Segoe UI, sans-serif', 'font-weight': 600 });
+      xTitle.textContent = 'Zeitverbrauch pro Zug (Sekunden)';
+      const yTitle = add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-family': 'Segoe UI, sans-serif', 'font-weight': 600 });
+      yTitle.textContent = 'Bewertungsänderung (Bauern)';
+
+      points.forEach((point) => {
+        const circle = add('circle', { cx: x(point.x), cy: y(point.y), r: 5, fill: point.color, 'fill-opacity': .9, stroke: '#fffefa', 'stroke-width': 1.5 });
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        const moveNotation = `${point.moveNumber}${point.move.color === 'white' ? '.' : '...'} ${point.move.san}`;
+        title.textContent = `${point.game.white} - ${point.game.black}, ${point.game.date}: ${moveNotation}, Zeit ${formatSeconds(point.x)}, Bewertung ${point.y >= 0 ? '+' : ''}${point.y.toFixed(2)}`;
+        circle.appendChild(title);
+      });
+
+      elements.chart.appendChild(svg);
+    }
+
+    function analyze() {
+      const playerName = elements.player.value;
+      const selectedGames = games.filter((game, index) => {
+        const inSelectedGame = elements.game.value === 'all' || Number(elements.game.value) === index;
+        return inSelectedGame && (game.white === playerName || game.black === playerName);
+      });
+      const totalMoves = selectedGames.reduce((sum, game) => sum + game.moves.length, 0);
+      const timeControl = {
+        initialMinutes: Number(elements.initialTime.value) || 0,
+        incrementSeconds: Number(elements.incrementTime.value) || 0,
+        additionalMinutes: Number(elements.additionalTime.value) || 0
+      };
+      const points = collectPoints(selectedGames, playerName, timeControl);
+      elements.selectedGames.textContent = String(selectedGames.length);
+      elements.selectedMoves.textContent = String(totalMoves);
+      elements.plottedMoves.textContent = String(points.length);
+      drawChart(points);
+      setStatus(`${selectedGames.length} ${selectedGames.length === 1 ? 'Partie' : 'Partien'} ausgewertet.`);
+    }
+
+    elements.file.addEventListener('change', async () => {
+      const file = elements.file.files?.[0];
+      if (!file) return;
+      try {
+        const parsed = splitPgnGames(await file.text()).map(parseGame).filter((game) => game.moves.length > 0);
+        if (parsed.length === 0) throw new Error('In der Datei wurden keine Partien mit Zügen erkannt.');
+        games = parsed;
+        elements.fileName.textContent = file.name;
+        elements.totalGames.textContent = String(games.length);
+        elements.qualifiedGames.textContent = String(games.filter((game) => game.hasClock && game.hasEvaluation).length);
+        const players = playersInGames();
+        elements.player.replaceChildren(...players.map(({ name, count }) => new Option(`${name} (${count})`, name)));
+        elements.player.disabled = players.length === 0;
+        elements.game.disabled = players.length === 0;
+        elements.analyze.disabled = players.length === 0;
+        elements.player.value = players[0]?.name || '';
+        updatePlayerCount();
+        elements.selectedGames.textContent = '–';
+        elements.selectedMoves.textContent = '–';
+        elements.plottedMoves.textContent = '–';
+        elements.chart.innerHTML = '<div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>';
+        setStatus(`${games.length} Partien geladen.`);
+      } catch (error) {
+        games = [];
+        elements.totalGames.textContent = '0';
+        elements.qualifiedGames.textContent = '0';
+        elements.playerGameCount.textContent = '–';
+        elements.player.replaceChildren(new Option('Keine Partien gefunden', ''));
+        elements.player.disabled = true;
+        elements.game.disabled = true;
+        elements.analyze.disabled = true;
+        elements.fileName.textContent = file.name;
+        setStatus(error.message || 'Die PGN-Datei konnte nicht gelesen werden.', true);
+      }
+    });
+
+    elements.player.addEventListener('change', updatePlayerCount);
+    elements.analyze.addEventListener('click', analyze);
+    window.addEventListener('resize', () => {
+      if (elements.selectedGames.textContent !== '–' && elements.player.value) analyze();
+    });
+  </script>
+</body>
+</html>
