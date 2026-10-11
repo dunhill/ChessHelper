@@ -62,6 +62,8 @@
     .player-count { min-height: 19px; margin: 8px 0 0; color: var(--muted); font-size: .82rem; }
     .game-controls { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(225px, 1fr); gap: 14px; align-items: end; margin-top: 21px; }
     .game-field { margin-top: 0; min-width: 0; }
+      .compare-player-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; align-items: end; }
+      .compare-player-list { display: grid; gap: 8px; margin-top: 8px; }
     .time-control { min-width: 0; margin: 0; padding: 0; border: 0; }
     .time-control legend { margin-bottom: 7px; color: var(--muted); font-size: .78rem; font-weight: 700; }
     .time-control-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
@@ -181,10 +183,14 @@
           <label class="field-label" for="playerSelect">Spieler</label>
           <select id="playerSelect" disabled><option value="">Zuerst eine PGN-Datei laden</option></select>
           <p class="player-count" id="playerCountText" aria-live="polite">Die Spielerliste wird nach dem Laden erstellt.</p>
-                    <label class="field-label" for="comparePlayerSelect">Compare to player (optional)</label>
-                    <select id="comparePlayerSelect" disabled>
-                      <option value="">No comparison selected</option>
-                    </select>
+          <label class="field-label" for="comparePlayerSelect">Compare to player (optional)</label>
+          <div class="compare-player-controls">
+            <select id="comparePlayerSelect" class="comparison-player-select" disabled>
+              <option value="">No comparison selected</option>
+            </select>
+            <button id="addComparedPlayer" type="button" aria-label="Add another comparison player" title="Add another comparison player" disabled>+</button>
+          </div>
+          <div class="compare-player-list" id="additionalComparePlayers"></div>
           <div class="game-controls">
             <div class="game-field">
               <label class="field-label" for="gameSelect">Partie</label>
@@ -200,7 +206,6 @@
             </fieldset>
           </div>
           <div class="analyze-row">
-            <button id="analyzeButton" type="button" disabled>Analysieren</button>
             <p class="status" id="status" role="status" aria-live="polite">Lade eine PGN-Datei, um zu beginnen.</p>
           </div>
         </div>
@@ -210,15 +215,15 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr>
+              <thead>
+                <tr id="moveComparisonHead">
                   <th scope="col">Time per move</th>
                   <th scope="col">PGN total</th>
                   <th scope="col">Selected player</th>
-                  <th scope="col">Compared player</th>
                 </tr>
               </thead>
               <tbody id="moveComparisonBody">
-                <tr><td class="empty-cell" colspan="4">Choose a comparison player to enable this table.</td></tr>
+                <tr><td class="empty-cell" colspan="3">Select a player to see move comparisons.</td></tr>
               </tbody>
             </table>
           </div>
@@ -245,6 +250,7 @@
           <p class="chart-hint">Jeder Punkt entspricht einem Zug des gewählten Spielers.</p>
           <div class="chart-wrap" id="chart" aria-live="polite">
             <div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>
+                      <div class="empty-chart">Die Analyse wird nach dem Laden einer PGN-Datei automatisch erstellt.</div>
           </div>
           <div class="legend" id="legend">
             <span class="legend-item"><span class="legend-dot" style="background:#858b88"></span>Ohne Symbol</span>
@@ -313,7 +319,7 @@
       playerCountText: document.getElementById('playerCountText'), game: document.getElementById('gameSelect'),
       initialTime: document.getElementById('initialTime'), incrementTime: document.getElementById('incrementTime'),
       additionalTime: document.getElementById('additionalTime'),
-      analyze: document.getElementById('analyzeButton'), status: document.getElementById('status'),
+      status: document.getElementById('status'),
       selectedGames: document.getElementById('selectedGameCount'), selectedMoves: document.getElementById('selectedMoveCount'),
       plottedMoves: document.getElementById('plottedMoveCount'), chart: document.getElementById('chart'), legend: document.getElementById('legend'),
       moveStatsBody: document.getElementById('moveStatsBody'),
@@ -323,7 +329,9 @@
       comparisonLegend: document.getElementById('comparisonLegend'), comparisonEvaluationChart: document.getElementById('comparisonEvaluationChart'),
         comparisonHoverTooltip: document.getElementById('comparisonHoverTooltip'),
       comparePlayer: document.getElementById('comparePlayerSelect'), moveComparisonBody: document.getElementById('moveComparisonBody'),
-        moveComparisonChart: document.getElementById('moveComparisonChart'),
+      additionalComparePlayers: document.getElementById('additionalComparePlayers'),
+      moveComparisonHead: document.getElementById('moveComparisonHead'), moveComparisonChart: document.getElementById('moveComparisonChart'),
+      addComparedPlayer: document.getElementById('addComparedPlayer'),
       previousComparisonGame: document.getElementById('previousComparisonGame'),
       nextComparisonGame: document.getElementById('nextComparisonGame')
     };
@@ -465,12 +473,48 @@
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'de'));
     }
 
-    function updateComparePlayerOptions() {
-      elements.comparePlayer.replaceChildren(new Option('No comparison selected', ''));
-      playersInGames().forEach(({ name }) => elements.comparePlayer.add(new Option(name, name)));
-      elements.comparePlayer.disabled = games.length === 0;
-      elements.comparePlayer.value = '';
-      renderMoveComparison([], [], []);
+    function getComparePlayerSelects() {
+      return [elements.comparePlayer, ...elements.additionalComparePlayers.querySelectorAll('select')];
+    }
+
+    function getComparedPlayerNames() {
+      return Array.from(new Set(getComparePlayerSelects().map((select) => select.value).filter(Boolean)));
+    }
+
+    function updateComparePlayerOptions(reset = false) {
+      if (reset) {
+        elements.additionalComparePlayers.replaceChildren();
+        elements.comparePlayer.value = '';
+      }
+
+      const playerNames = playersInGames().map(({ name }) => name);
+      const selects = getComparePlayerSelects();
+      selects.forEach((select) => {
+        const previousValue = select.value;
+        const unavailable = new Set([elements.player.value]);
+        selects.forEach((other) => {
+          if (other !== select && other.value) unavailable.add(other.value);
+        });
+        const placeholder = select === elements.comparePlayer ? 'No comparison selected' : 'Select another player';
+        select.replaceChildren(new Option(placeholder, ''));
+        playerNames.forEach((name) => {
+          if (!unavailable.has(name) || name === previousValue) select.add(new Option(name, name));
+        });
+        select.disabled = games.length === 0;
+        select.value = playerNames.includes(previousValue) && !unavailable.has(previousValue) ? previousValue : '';
+      });
+
+      const selectedComparisons = getComparedPlayerNames();
+      const hasUnusedPlayers = playerNames.some((name) => name !== elements.player.value && !selectedComparisons.includes(name));
+      elements.addComparedPlayer.disabled = games.length === 0 || selectedComparisons.length === 0 || !hasUnusedPlayers;
+    }
+
+    function addComparePlayerSelect() {
+      const select = document.createElement('select');
+      select.className = 'comparison-player-select';
+      select.setAttribute('aria-label', `Compared player ${elements.additionalComparePlayers.children.length + 2}`);
+      elements.additionalComparePlayers.appendChild(select);
+      updateComparePlayerOptions();
     }
 
     function updatePlayerCount() {
@@ -480,7 +524,8 @@
       elements.playerCountText.textContent = playerName ? `${count} ${count === 1 ? 'Partie' : 'Partien'} mit diesem Spieler in der Datei.` : 'Die Spielerliste wird nach dem Laden erstellt.';
       updateGameOptions();
       updateOpponentClockComparison(true);
-      if (elements.comparePlayer.value && games.length) analyze();
+      updateComparePlayerOptions();
+      if (playerName && games.length) analyze();
     }
 
     function updateGameOptions() {
@@ -894,12 +939,12 @@
     }
 
     function renderMoveComparison(selectedGames, selectedMoves, timeControl) {
-      const comparedPlayer = elements.comparePlayer.value;
-      if (!comparedPlayer || !timeControl) {
-        elements.moveComparisonBody.innerHTML = '<tr><td class="empty-cell" colspan="4">Choose a comparison player to enable this table.</td></tr>';
+      if (!timeControl) {
+        elements.moveComparisonBody.innerHTML = '<tr><td class="empty-cell" colspan="3">Select a player to see move comparisons.</td></tr>';
         elements.moveComparisonChart.replaceChildren();
         return;
       }
+      const comparedPlayers = getComparedPlayerNames();
 
       const categories = [
         { label: '0-10 sec', maximum: 10 },
@@ -908,13 +953,13 @@
         { label: '1-3 min', maximum: 180 },
         { label: '3-10 min', maximum: 600 },
         { label: '10+ min', maximum: Infinity }
-      ].map((category) => ({ ...category, counts: [0, 0, 0] }));
-      const comparedMoves = collectPlayerMoves(games, comparedPlayer, timeControl);
+      ].map((category) => ({ ...category, counts: Array(2 + comparedPlayers.length).fill(0) }));
+      const comparedMoves = comparedPlayers.map((playerName) => collectPlayerMoves(games, playerName, timeControl));
       const allPgnMoves = games.flatMap((game) =>
         Array.from(new Set([game.white, game.black]))
           .flatMap((playerName) => collectPlayerMoves([game], playerName, timeControl))
       );
-      const columns = [allPgnMoves, selectedMoves, comparedMoves];
+      const columns = [allPgnMoves, selectedMoves, ...comparedMoves];
 
       columns.forEach((moves, columnIndex) => {
         moves.forEach((move) => {
@@ -924,14 +969,23 @@
         });
       });
 
-      const columnTotals = [0, 1, 2].map((columnIndex) =>
+      const columnTotals = Array.from({ length: columns.length }, (_, columnIndex) =>
         categories.reduce((total, category) => total + category.counts[columnIndex], 0)
       );
-      const distributions = [0, 1, 2].map((columnIndex) =>
+      const distributions = Array.from({ length: columns.length }, (_, columnIndex) =>
         categories.map((category) => columnTotals[columnIndex]
           ? category.counts[columnIndex] / columnTotals[columnIndex] * 100
           : 0)
       );
+
+      const columnNames = ['PGN total', elements.player.value, ...comparedPlayers];
+      elements.moveComparisonHead.replaceChildren();
+      ['Time per move', ...columnNames].forEach((name) => {
+        const header = document.createElement('th');
+        header.scope = 'col';
+        header.textContent = name;
+        elements.moveComparisonHead.appendChild(header);
+      });
 
       elements.moveComparisonBody.replaceChildren(...categories.map((category) => {
         const row = document.createElement('tr');
@@ -954,10 +1008,10 @@
 
         return row;
       }));
-      drawMoveComparisonChart(categories, distributions);
+      drawMoveComparisonChart(categories, distributions, comparedPlayers);
     }
 
-    function drawMoveComparisonChart(categories, distributions) {
+    function drawMoveComparisonChart(categories, distributions, comparedPlayers) {
       const width = 760;
       const height = 300;
       const margin = { top: 18, right: 18, bottom: 66, left: 52 };
@@ -978,10 +1032,15 @@
         svg.appendChild(node);
         return node;
       };
+      const comparedColors = ['#d26b50', '#3478c8', '#a2537b', '#9b7a24', '#587d43', '#7463a8'];
       const labels = [
         { name: 'PGN total', color: '#202923', values: distributions[0] },
         { name: elements.player.value, color: '#1c674d', values: distributions[1] },
-        { name: elements.comparePlayer.value, color: '#d26b50', values: distributions[2] }
+        ...comparedPlayers.map((name, index) => ({
+          name,
+          color: comparedColors[index % comparedColors.length],
+          values: distributions[index + 2]
+        }))
       ];
 
       for (let percentage = 0; percentage <= yAxisMaximum; percentage += yTickStep) {
@@ -1149,19 +1208,19 @@
         updateComparePlayerOptions();
         elements.player.disabled = players.length === 0;
         elements.game.disabled = players.length === 0;
-        elements.analyze.disabled = players.length === 0;
         elements.player.value = players[0]?.name || '';
-        updatePlayerCount();
         elements.selectedGames.textContent = '–';
         elements.selectedMoves.textContent = '–';
         elements.plottedMoves.textContent = '–';
         lastPoints = [];
         zoomLevel = 1;
         elements.chart.innerHTML = '<div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>';
+          elements.chart.innerHTML = '<div class="empty-chart">Die Analyse wird nach dem Laden einer PGN-Datei automatisch erstellt.</div>';
         elements.zoomOut.disabled = true;
         elements.zoomIn.disabled = true;
         elements.resetZoom.disabled = true;
         setStatus(`${games.length} Partien geladen.`);
+        updatePlayerCount();
       } catch (error) {
         games = [];
         elements.totalGames.textContent = '0';
@@ -1170,7 +1229,6 @@
         elements.player.replaceChildren(new Option('Keine Partien gefunden', ''));
         elements.player.disabled = true;
         elements.game.disabled = true;
-        elements.analyze.disabled = true;
         elements.comparePlayer.disabled = true;
         renderMoveComparison([], [], null);
         elements.fileName.textContent = file.name;
@@ -1179,12 +1237,16 @@
     });
 
     elements.player.addEventListener('change', updatePlayerCount);
-    elements.comparePlayer.addEventListener('change', () => {
+    const refreshComparedPlayers = () => {
+      updateComparePlayerOptions();
       if (elements.player.value) analyze();
-    });
+    };
+    elements.comparePlayer.addEventListener('change', refreshComparedPlayers);
+    elements.additionalComparePlayers.addEventListener('change', refreshComparedPlayers);
+    elements.addComparedPlayer.addEventListener('click', addComparePlayerSelect);
     elements.game.addEventListener('change', () => {
       updateOpponentClockComparison(true);
-      if (elements.comparePlayer.value && elements.player.value) analyze();
+      if (elements.player.value) analyze();
     });
     elements.previousComparisonGame.addEventListener('click', () => {
       comparisonPosition = Math.max(0, comparisonPosition - 1);
@@ -1197,10 +1259,9 @@
     [elements.initialTime, elements.incrementTime, elements.additionalTime].forEach((input) => {
       input.addEventListener('input', () => {
         updateOpponentClockComparison();
-        if (elements.comparePlayer.value && elements.player.value) analyze();
+        if (elements.player.value) analyze();
       });
     });
-    elements.analyze.addEventListener('click', analyze);
     elements.zoomIn.addEventListener('click', () => {
       zoomLevel = Math.min(32, zoomLevel * 1.25);
       drawChart(lastPoints);
