@@ -128,6 +128,8 @@
   .clock-comparison h2 { margin: 0; font: 600 1.2rem Georgia, "Times New Roman", serif; }
   .comparison-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
   .comparison-game-name { margin: 8px 0 10px; color: var(--muted); font-size: .82rem; }
+  .clock-scale-toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--muted); font-size: .82rem; }
+  .clock-scale-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
   .comparison-chart { width: 100%; min-height: 260px; }
   .comparison-chart svg { width: 100%; }
   .comparison-evaluation { margin-top: 2px; }
@@ -293,6 +295,10 @@
             </div>
           </div>
           <p class="comparison-game-name" id="comparisonGameName">Load a PGN to compare player clocks.</p>
+          <label class="clock-scale-toggle" for="logarithmicClockScale">
+            <input id="logarithmicClockScale" type="checkbox">
+            Logarithmic Y-axis
+          </label>
           <div class="comparison-chart" id="comparisonChart" aria-live="polite">
             <div class="empty-chart">The selected player's games will appear here.</div>
           </div>
@@ -311,7 +317,7 @@
   <script>
     'use strict';
 
-    const qualityColors = { default: '#858b88', blunder: '#d34c42', mistake: '#df8a36', dubious: '#3478c8' };
+  const qualityColors = { ok: '#858b88', blunder: '#d34c42', error: '#df8a36', inaccuracy: '#3478c8' };
     const elements = {
       file: document.getElementById('pgnFile'), fileName: document.getElementById('fileName'),
       totalGames: document.getElementById('totalGames'), qualifiedGames: document.getElementById('qualifiedGames'),
@@ -328,6 +334,7 @@
       comparisonChart: document.getElementById('comparisonChart'), comparisonName: document.getElementById('comparisonGameName'),
       comparisonLegend: document.getElementById('comparisonLegend'), comparisonEvaluationChart: document.getElementById('comparisonEvaluationChart'),
         comparisonHoverTooltip: document.getElementById('comparisonHoverTooltip'),
+      logarithmicClockScale: document.getElementById('logarithmicClockScale'),
       comparePlayer: document.getElementById('comparePlayerSelect'), moveComparisonBody: document.getElementById('moveComparisonBody'),
       additionalComparePlayers: document.getElementById('additionalComparePlayers'),
       moveComparisonHead: document.getElementById('moveComparisonHead'), moveComparisonChart: document.getElementById('moveComparisonChart'),
@@ -550,6 +557,10 @@
       return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`;
     }
 
+    function clockBeforeIncrement(clock, incrementSeconds) {
+      return clock - incrementSeconds;
+    }
+
     function getQualityAnnotation(san) {
       if (san.endsWith('??')) return { symbol: '??', quality: 'blunder', color: '#d34c42' };
       if (san.endsWith('?!')) return { symbol: '?!', quality: 'inaccuracy', color: '#3478c8' };
@@ -598,22 +609,32 @@
       });
 
       const formatEvaluation = (value) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+      const timeControl = {
+        initialMinutes: Number(elements.initialTime.value) || 0,
+        incrementSeconds: Number(elements.incrementTime.value) || 0,
+        additionalMinutes: Number(elements.additionalTime.value) || 0
+      };
       const describeLastMove = (side, player) => {
         let lastIndex = -1;
         for (let index = 0; index < Math.min(ply, game.moves.length); index += 1) {
           if (game.moves[index].color === side) lastIndex = index;
         }
-        if (lastIndex < 0) return `${player}: start · ${formatSeconds((Number(elements.initialTime.value) || 0) * 60)} · Eval ${formatEvaluation(evaluationAfterPly[0])}`;
+        if (lastIndex < 0) {
+          return `${player}: start · Remaining ${formatSeconds(timeControl.initialMinutes * 60)} · Last move — · Eval ${formatEvaluation(evaluationAfterPly[0])}`;
+        }
 
         const move = game.moves[lastIndex];
         const moveNumber = Math.floor(lastIndex / 2) + 1;
         const notation = `${moveNumber}${side === 'white' ? '.' : '...'} ${move.san}`;
-        const clock = move.clock == null ? 'clock unavailable' : formatSeconds(move.clock);
-        return `${player}: ${notation} · ${clock} · Eval ${formatEvaluation(evaluationAfterPly[lastIndex + 1])}`;
+        const remaining = move.clock == null
+          ? 'clock unavailable'
+          : formatSeconds(Math.max(0, clockBeforeIncrement(move.clock, timeControl.incrementSeconds)));
+        const spentMove = collectPlayerMoves([game], player, timeControl).find((point) => point.move === move);
+        const spent = spentMove ? formatSeconds(spentMove.x) : 'time unavailable';
+        return `${player}: ${notation} · Remaining ${remaining} · Last move ${spent} · Eval ${formatEvaluation(evaluationAfterPly[lastIndex + 1])}`;
       };
 
       return [
-        `Move ${ply}`,
         describeLastMove('white', game.white),
         describeLastMove('black', game.black)
       ].join('\n');
@@ -707,7 +728,11 @@
             game.moves.forEach((move, index) => {
               if (move.clock == null) return;
               const playerSeries = series.find((entry) => entry.side === move.color);
-              if (playerSeries) playerSeries.points.push({ x: index + 1, y: move.clock, ...getQualityAnnotation(move.san) });
+              if (playerSeries) playerSeries.points.push({
+                x: index + 1,
+                y: Math.max(0, clockBeforeIncrement(move.clock, Number(elements.incrementTime.value) || 0)),
+                ...getQualityAnnotation(move.san)
+              });
             });
 
             elements.comparisonName.textContent = `Game ${comparisonPosition + 1} of ${comparisonGames.length} · ${formatGame(game)}`;
@@ -730,7 +755,11 @@
             const secondStep = minuteStep * 60;
             const yMaximum = Math.max(secondStep, Math.ceil(maxClock / secondStep) * secondStep);
             const x = (value) => margin.left + value / maxMove * plotWidth;
-            const y = (value) => margin.top + (yMaximum - value) / yMaximum * plotHeight;
+            const logarithmicScale = elements.logarithmicClockScale.checked;
+            const logarithmicMaximum = Math.log1p(yMaximum);
+            const y = logarithmicScale
+              ? (value) => margin.top + (logarithmicMaximum - Math.log1p(Math.max(0, value))) / logarithmicMaximum * plotHeight
+              : (value) => margin.top + (yMaximum - value) / yMaximum * plotHeight;
             const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
             svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
             svg.setAttribute('role', 'img');
@@ -749,15 +778,26 @@
 
             drawCompletedMoveAxis(svg, maxMove, x, margin.top, height - margin.bottom, height - margin.bottom + 19);
 
-            for (let clockValue = 0; clockValue <= yMaximum; clockValue += secondStep) {
+            const clockTicks = logarithmicScale ? [0] : [];
+            if (logarithmicScale) {
+              for (let magnitude = 1; magnitude <= yMaximum; magnitude *= 10) {
+                [1, 2, 5].forEach((factor) => {
+                  const clockValue = factor * magnitude;
+                  if (clockValue <= yMaximum) clockTicks.push(clockValue);
+                });
+              }
+            } else {
+              for (let clockValue = 0; clockValue <= yMaximum; clockValue += secondStep) clockTicks.push(clockValue);
+            }
+            clockTicks.forEach((clockValue) => {
               const yPosition = y(clockValue);
               add('line', { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition, stroke: '#e5e9e1' });
               const label = add('text', { x: margin.left - 10, y: yPosition + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11 });
               label.textContent = formatSeconds(clockValue);
-            }
+            });
 
             const yTitle = add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-weight': 600 });
-            yTitle.textContent = 'Remaining clock time (mm:ss)';
+            yTitle.textContent = `Remaining clock time (mm:ss, ${logarithmicScale ? 'logarithmic' : 'linear'})`;
 
             series.forEach((entry) => {
               const pathData = entry.points.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.x)},${y(point.y)}`).join(' ');
@@ -878,15 +918,17 @@
           playerMoveNumber += 1;
           let spent = null;
           if (move.clock != null) {
+            const moveClockBeforeIncrement = clockBeforeIncrement(move.clock, timeControl.incrementSeconds);
             spent = playerMoveNumber === 1
-              ? timeControl.initialMinutes * 60 + timeControl.incrementSeconds - move.clock
-              : previousPlayerClock == null ? null : previousPlayerClock - move.clock + timeControl.incrementSeconds;
+              ? timeControl.initialMinutes * 60 - moveClockBeforeIncrement
+              : previousPlayerClock == null ? null : previousPlayerClock - moveClockBeforeIncrement;
             previousPlayerClock = move.clock;
           }
           if (spent != null && spent < 0 && playerMoveNumber > 40 && !additionalTimeUsed) {
             spent += timeControl.additionalMinutes * 60;
             additionalTimeUsed = true;
           }
+          if (spent != null) spent = Math.max(0, spent);
           if (spent == null) return;
           const quality = move.san.endsWith('??') ? 'blunder' : move.san.endsWith('?!') ? 'inaccuracy' : move.san.endsWith('?') ? 'error' : 'ok';
           points.push({ x: spent, y: evaluationChange == null ? null : playsWhite ? evaluationChange : -evaluationChange, game, gameIndex, moveNumber: Math.floor(moveIndex / 2) + 1, move, quality, color: qualityColors[quality] || qualityColors.default });
@@ -1256,6 +1298,7 @@
       comparisonPosition += 1;
       updateOpponentClockComparison();
     });
+    elements.logarithmicClockScale.addEventListener('change', () => updateOpponentClockComparison());
     [elements.initialTime, elements.incrementTime, elements.additionalTime].forEach((input) => {
       input.addEventListener('input', () => {
         updateOpponentClockComparison();
