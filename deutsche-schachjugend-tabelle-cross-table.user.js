@@ -126,6 +126,28 @@
     return match ? `${url.origin}${match[1]}/` : `${url.origin}${pathname}/`;
   }
 
+  function addTieRanges(positions) {
+    const playersByPoints = new Map();
+    positions.forEach((value) => {
+      if (value.points == null) {
+        value.tieRange = String(value.position);
+        return;
+      }
+      if (!playersByPoints.has(value.points)) playersByPoints.set(value.points, []);
+      playersByPoints.get(value.points).push(value);
+    });
+
+    playersByPoints.forEach((players) => {
+      const places = players.map((player) => player.position);
+      const firstPlace = Math.min(...places);
+      const lastPlace = Math.max(...places);
+      const tieRange = players.length > 1 ? `${firstPlace}-${lastPlace}` : String(firstPlace);
+      players.forEach((player) => {
+        player.tieRange = tieRange;
+      });
+    });
+  }
+
   async function fetchRoundPositions(baseUrl, roundNumber) {
     // Support round 0 (initial/start list) where the URL uses 'spieler' instead of 'tabelle'
     let roundUrl;
@@ -198,6 +220,7 @@
         // sort by initial ascending
         parsed.sort((a, b) => a.initial - b.initial || a.rowIndex - b.rowIndex);
         parsed.forEach((p, i) => positions.set(p.key, { position: i + 1, points: p.points ?? null }));
+        addTieRanges(positions);
         return positions;
       }
 
@@ -221,6 +244,7 @@
           cursor += 1;
         });
       }
+      addTieRanges(positions);
       return positions;
     } catch (error) {
       console.error(`${LOG_PREFIX} Error fetching round positions`, { roundNumber, error });
@@ -279,6 +303,7 @@
         name: player.name,
         positions: Array(positionsByRound.length).fill(null),
         points: Array(positionsByRound.length).fill(null),
+        tieRanges: Array(positionsByRound.length).fill(null),
         currentPosition: player.currentPosition
       });
     });
@@ -289,6 +314,7 @@
         if (entry) {
           entry.positions[roundIndex] = val && typeof val === 'object' ? val.position : val;
           entry.points[roundIndex] = val && typeof val === 'object' ? (val.points ?? null) : null;
+          entry.tieRanges[roundIndex] = val && typeof val === 'object' ? (val.tieRange ?? null) : null;
         }
       });
     });
@@ -437,16 +463,18 @@
 
         const pointTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
         const roundLabel = roundIndex === 0 ? 'Start' : `Runde ${roundIndex}`;
+        const tieRange = player.tieRanges ? player.tieRanges[roundIndex] : null;
+        const tieText = tieRange && tieRange.includes('-') ? ` — Tie ${tieRange}` : '';
         const totalPoints = player.points ? player.points[roundIndex] : null;
         const prevPoints = player.points && roundIndex > 0 ? player.points[roundIndex - 1] : null;
         const delta = (totalPoints != null && prevPoints != null) ? (totalPoints - prevPoints) : null;
         const deltaText = delta != null ? formatDelta(delta) : '';
         const pointsText = totalPoints != null ? formatPoints(totalPoints) : '';
-        pointTitle.textContent = `${player.name} — ${roundLabel} — Platz ${position}\nPunkte: ${pointsText}${deltaText ? ' (' + deltaText + ')' : ''}`;
+        pointTitle.textContent = `${player.name} — ${roundLabel} — Platz ${position}${tieText}\nPunkte: ${pointsText}${deltaText ? ' (' + deltaText + ')' : ''}`;
         point.appendChild(pointTitle);
 
         point.addEventListener('mouseenter', () => {
-          const line1 = `${player.name} — ${roundLabel} — Platz ${position}`;
+          const line1 = `${player.name} — ${roundLabel} — Platz ${position}${tieText}`;
           const line2 = `Punkte: ${pointsText}${deltaText ? ' (' + deltaText + ')' : ''}`;
           caption.innerHTML = `${line1}<br><strong>${line2}</strong>`;
         });
