@@ -31,6 +31,7 @@
     }
 
     main { width: min(1100px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 64px; }
+    main.chart-expanded { width: min(1600px, calc(100% - 40px)); }
     .eyebrow { margin: 0 0 8px; color: var(--green); font: 700 .76rem/1.2 "Courier New", monospace; text-transform: uppercase; }
     h1 { margin: 0; font: 500 clamp(2rem, 5vw, 3.15rem)/1.05 Georgia, "Times New Roman", serif; letter-spacing: 0; }
     .intro { max-width: 680px; margin: 12px 0 28px; color: var(--muted); line-height: 1.55; }
@@ -42,6 +43,8 @@
     .stat-label { display: block; margin-top: 5px; color: var(--muted); font-size: .83rem; }
 
     .workflow { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 28px; align-items: start; }
+    .workflow.chart-expanded { grid-template-columns: minmax(0, 1fr); }
+    .workflow.chart-expanded .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .steps { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); box-shadow: var(--shadow); }
     .step { background: var(--surface); padding: 21px 22px 23px; }
     .step-heading { display: flex; align-items: baseline; gap: 10px; margin: 0 0 15px; font: 600 1.08rem/1.3 Georgia, "Times New Roman", serif; }
@@ -81,6 +84,12 @@
     .result-stats .stat-label { font-size: .73rem; }
     .chart-panel { margin-top: 20px; padding: 18px 18px 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
     .chart-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin: 0 0 3px; font: 600 1.1rem Georgia, "Times New Roman", serif; }
+    .chart-heading h2 { margin: 0; font: inherit; }
+    .chart-tools { display: flex; align-items: center; gap: 6px; }
+    .chart-tool { min-width: 36px; min-height: 34px; padding: 0 9px; background: #edf1e9; color: var(--ink); font-size: 1rem; }
+    .chart-tool:hover:not(:disabled) { background: #dfe8dc; }
+    .chart-tool:disabled { background: #edf1e9; color: #9aa39b; }
+    .chart-tool-expand { min-width: auto; font-size: .78rem; }
     .chart-hint { margin: 0 0 12px; color: var(--muted); font-size: .78rem; }
     .chart-wrap { position: relative; width: 100%; min-height: 320px; }
     svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -89,10 +98,39 @@
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-dot { width: 9px; height: 9px; border-radius: 50%; }
     .footnote { margin: 13px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+    .move-stats { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 20px; }
+    .move-stats h2 { margin: 0; font: 600 1.2rem Georgia, "Times New Roman", serif; }
+    .move-stats-intro { margin: 6px 0 14px; color: var(--muted); font-size: .8rem; }
+    .table-wrap { overflow-x: auto; }
+    .move-stats table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .84rem; }
+    .move-stats th, .move-stats td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    .move-stats th { color: var(--muted); font-size: .74rem; font-weight: 700; }
+    .move-stats th:first-child, .move-stats td:first-child { text-align: left; }
+    .move-stats th small { display: block; margin-top: 3px; font-weight: 400; }
+    .move-stats td .count { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .move-stats td .percentage { display: block; margin-top: 2px; color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+    .move-stats .empty-cell { padding: 20px 12px; color: var(--muted); text-align: left; }
+  .clock-comparison { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 20px; }
+  .clock-comparison h2 { margin: 0; font: 600 1.2rem Georgia, "Times New Roman", serif; }
+  .comparison-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .comparison-game-name { margin: 8px 0 10px; color: var(--muted); font-size: .82rem; }
+  .comparison-chart { width: 100%; min-height: 260px; }
+  .comparison-chart svg { width: 100%; }
+  .comparison-evaluation { margin-top: 2px; }
+  .comparison-evaluation { margin-top: 0; }
+  .comparison-evaluation .comparison-chart { min-height: 230px; }
+  .comparison-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; font-size: .8rem; }
+  .comparison-legend-item { display: inline-flex; align-items: center; gap: 7px; }
+  .comparison-legend-line { width: 20px; height: 3px; background: currentColor; }
+  .comparison-hover-tooltip { position: fixed; z-index: 10000; max-width: min(360px, calc(100vw - 20px)); padding: 9px 11px; background: #202923; color: #fffefa; box-shadow: 0 4px 16px rgba(0, 0, 0, .2); font-size: .76rem; line-height: 1.45; white-space: pre-line; pointer-events: none; }
+  .comparison-quality-symbol { min-width: 18px; font-weight: 800; text-align: center; }
 
     @media (max-width: 760px) {
       main { width: min(100% - 26px, 560px); padding-top: 27px; }
       .workflow { grid-template-columns: 1fr; gap: 27px; }
+      .workflow.chart-expanded .steps { grid-template-columns: 1fr; }
+      main.chart-expanded { width: calc(100% - 26px); }
+      .chart-heading { align-items: flex-start; flex-wrap: wrap; }
       .game-controls { grid-template-columns: 1fr; gap: 16px; }
       .stat { padding-right: 9px; }
       .stat + .stat { padding-left: 10px; }
@@ -159,7 +197,15 @@
           <div class="stat"><span class="stat-value" id="plottedMoveCount">–</span><span class="stat-label">Züge im Diagramm</span></div>
         </div>
         <div class="chart-panel">
-          <h2 class="chart-heading">Zeitverbrauch &amp; Bewertungsänderung</h2>
+          <div class="chart-heading">
+            <h2>Zeitverbrauch &amp; Bewertungsänderung</h2>
+            <div class="chart-tools" aria-label="Diagrammsteuerung">
+              <button class="chart-tool" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
+              <button class="chart-tool" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+              <button class="chart-tool" id="resetZoom" type="button" title="Reset zoom" disabled>Reset</button>
+              <button class="chart-tool chart-tool-expand" id="expandChart" type="button" aria-expanded="false">Expand chart</button>
+            </div>
+          </div>
           <p class="chart-hint">Jeder Punkt entspricht einem Zug des gewählten Spielers.</p>
           <div class="chart-wrap" id="chart" aria-live="polite">
             <div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>
@@ -172,6 +218,50 @@
           </div>
           <p class="footnote">X: verbrauchte Zeit in Sekunden, einschließlich Zugabe pro Zug. Der erste Zug verwendet Startzeit + Zugabe − Restzeit. Ein negatives Ergebnis nach dem 40. Zug erhält die Nach-40-Zeit einmalig. Y: Bewertungsänderung aus Sicht des gewählten Spielers; positive Werte sind vorteilhaft.</p>
         </div>
+        <section class="move-stats" aria-labelledby="moveStatsTitle">
+          <h2 id="moveStatsTitle">Move statistics by time spent</h2>
+          <p class="move-stats-intro">Each cell shows the move count and its percentage of that time category.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Time per move</th>
+                  <th scope="col">Total<small>count · % row</small></th>
+                  <th scope="col">OK<small>count · % row</small></th>
+                  <th scope="col">?!<small>count · % row</small></th>
+                  <th scope="col">?<small>count · % row</small></th>
+                  <th scope="col">??<small>count · % row</small></th>
+                </tr>
+              </thead>
+              <tbody id="moveStatsBody">
+                <tr><td class="empty-cell" colspan="6">Load a PGN and analyze a player to see move statistics.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="clock-comparison" aria-labelledby="clockComparisonTitle">
+          <div class="comparison-header">
+            <div>
+              <h2 id="clockComparisonTitle">Player vs opponent clock</h2>
+              <p class="chart-hint">Remaining clock time after each move. Move 0 shows the initial time.</p>
+            </div>
+            <div class="chart-tools" aria-label="Navigate games">
+              <button class="chart-tool" id="previousComparisonGame" type="button" aria-label="Previous game" title="Previous game" disabled>←</button>
+              <button class="chart-tool" id="nextComparisonGame" type="button" aria-label="Next game" title="Next game" disabled>→</button>
+            </div>
+          </div>
+          <p class="comparison-game-name" id="comparisonGameName">Load a PGN to compare player clocks.</p>
+          <div class="comparison-chart" id="comparisonChart" aria-live="polite">
+            <div class="empty-chart">The selected player's games will appear here.</div>
+          </div>
+          <div class="comparison-evaluation">
+            <div class="comparison-chart" id="comparisonEvaluationChart" aria-live="polite">
+              <div class="empty-chart">Evaluation data will appear here.</div>
+            </div>
+          </div>
+          <div class="comparison-legend" id="comparisonLegend"></div>
+          <div id="comparisonHoverTooltip" class="comparison-hover-tooltip" role="tooltip" hidden></div>
+        </section>
       </section>
     </div>
   </main>
@@ -189,9 +279,21 @@
       additionalTime: document.getElementById('additionalTime'),
       analyze: document.getElementById('analyzeButton'), status: document.getElementById('status'),
       selectedGames: document.getElementById('selectedGameCount'), selectedMoves: document.getElementById('selectedMoveCount'),
-      plottedMoves: document.getElementById('plottedMoveCount'), chart: document.getElementById('chart'), legend: document.getElementById('legend')
+      plottedMoves: document.getElementById('plottedMoveCount'), chart: document.getElementById('chart'), legend: document.getElementById('legend'),
+      moveStatsBody: document.getElementById('moveStatsBody'),
+      zoomOut: document.getElementById('zoomOut'), zoomIn: document.getElementById('zoomIn'),
+      resetZoom: document.getElementById('resetZoom'), expandChart: document.getElementById('expandChart'),
+      comparisonChart: document.getElementById('comparisonChart'), comparisonName: document.getElementById('comparisonGameName'),
+      comparisonLegend: document.getElementById('comparisonLegend'), comparisonEvaluationChart: document.getElementById('comparisonEvaluationChart'),
+        comparisonHoverTooltip: document.getElementById('comparisonHoverTooltip'),
+      previousComparisonGame: document.getElementById('previousComparisonGame'),
+      nextComparisonGame: document.getElementById('nextComparisonGame')
     };
     let games = [];
+    let lastPoints = [];
+    let zoomLevel = 1;
+    let comparisonPosition = 0;
+    let comparisonHoverMove = null;
 
     function readTagPairs(block) {
       const tags = {};
@@ -331,6 +433,7 @@
       elements.playerGameCount.textContent = playerName ? String(count) : '–';
       elements.playerCountText.textContent = playerName ? `${count} ${count === 1 ? 'Partie' : 'Partien'} mit diesem Spieler in der Datei.` : 'Die Spielerliste wird nach dem Laden erstellt.';
       updateGameOptions();
+      updateOpponentClockComparison(true);
     }
 
     function updateGameOptions() {
@@ -355,7 +458,317 @@
       return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`;
     }
 
-    function collectPoints(selectedGames, playerName, timeControl) {
+    function getQualityAnnotation(san) {
+      if (san.endsWith('??')) return { symbol: '??', quality: 'blunder', color: '#d34c42' };
+      if (san.endsWith('?!')) return { symbol: '?!', quality: 'inaccuracy', color: '#3478c8' };
+      if (san.endsWith('?')) return { symbol: '?', quality: 'error', color: '#df8a36' };
+      return { symbol: '', quality: 'ok', color: '#858b88' };
+    }
+
+    function drawCompletedMoveAxis(svg, maxMove, x, top, bottom, labelY, width, right) {
+      const completeMoves = Math.floor(maxMove / 2);
+      const labels = new Set([0]);
+      for (let moveNumber = 5; moveNumber <= completeMoves; moveNumber += 5) labels.add(moveNumber);
+      if (completeMoves > 0) labels.add(completeMoves);
+
+      for (let moveNumber = 10; moveNumber <= completeMoves; moveNumber += 10) {
+        const xPosition = x(moveNumber * 2);
+        const gridLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        gridLine.setAttribute('x1', String(xPosition));
+        gridLine.setAttribute('y1', String(top));
+        gridLine.setAttribute('x2', String(xPosition));
+        gridLine.setAttribute('y2', String(bottom));
+        gridLine.setAttribute('stroke', '#e5e9e1');
+        gridLine.setAttribute('stroke-width', '1');
+        svg.appendChild(gridLine);
+      }
+
+      labels.forEach((moveNumber) => {
+        const xPosition = x(moveNumber * 2);
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', xPosition);
+        label.setAttribute('y', labelY);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('fill', '#66736c');
+        label.setAttribute('font-size', '11');
+        label.textContent = String(moveNumber);
+        svg.appendChild(label);
+      });
+    }
+
+    function getHoverMoveDetails(game, playerName, ply) {
+      const selectedIsWhite = game.white === playerName;
+      let currentEvaluation = game.initialEvaluation ?? 0;
+      const evaluationAfterPly = [currentEvaluation];
+      game.moves.forEach((move) => {
+        if (move.evaluation != null) currentEvaluation = selectedIsWhite ? move.evaluation : -move.evaluation;
+        evaluationAfterPly.push(currentEvaluation);
+      });
+
+      const formatEvaluation = (value) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+      const describeLastMove = (side, player) => {
+        let lastIndex = -1;
+        for (let index = 0; index < Math.min(ply, game.moves.length); index += 1) {
+          if (game.moves[index].color === side) lastIndex = index;
+        }
+        if (lastIndex < 0) return `${player}: start · ${formatSeconds((Number(elements.initialTime.value) || 0) * 60)} · Eval ${formatEvaluation(evaluationAfterPly[0])}`;
+
+        const move = game.moves[lastIndex];
+        const moveNumber = Math.floor(lastIndex / 2) + 1;
+        const notation = `${moveNumber}${side === 'white' ? '.' : '...'} ${move.san}`;
+        const clock = move.clock == null ? 'clock unavailable' : formatSeconds(move.clock);
+        return `${player}: ${notation} · ${clock} · Eval ${formatEvaluation(evaluationAfterPly[lastIndex + 1])}`;
+      };
+
+      return [
+        `Move ${ply}`,
+        describeLastMove('white', game.white),
+        describeLastMove('black', game.black)
+      ].join('\n');
+    }
+
+    function bindComparisonHover(svg, game, playerName) {
+      const plotLeft = Number(svg.dataset.plotLeft);
+      const plotWidth = Number(svg.dataset.plotWidth);
+      const maxMove = Number(svg.dataset.maxMove);
+
+      svg.addEventListener('pointermove', (event) => {
+        const bounds = svg.getBoundingClientRect();
+        if (!bounds.width || !plotWidth || !maxMove) return;
+        const pointerX = (event.clientX - bounds.left) / bounds.width * 900;
+        const progress = Math.max(0, Math.min(1, (pointerX - plotLeft) / plotWidth));
+        comparisonHoverMove = progress * maxMove;
+        const hoveredPly = Math.max(0, Math.min(maxMove, Math.round(comparisonHoverMove)));
+        const tooltip = elements.comparisonHoverTooltip;
+        tooltip.textContent = getHoverMoveDetails(game, playerName, hoveredPly);
+        tooltip.hidden = false;
+        tooltip.style.left = `${Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8)}px`;
+        tooltip.style.top = `${Math.min(event.clientY + 12, window.innerHeight - tooltip.offsetHeight - 8)}px`;
+
+        [elements.comparisonChart.querySelector('svg'), elements.comparisonEvaluationChart.querySelector('svg')]
+          .filter(Boolean)
+          .forEach((target) => {
+            let guide = target.querySelector('.comparison-hover-guide');
+            if (!guide) {
+              guide = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+              guide.setAttribute('class', 'comparison-hover-guide');
+              guide.setAttribute('stroke', '#252b28');
+              guide.setAttribute('stroke-width', '1.25');
+              guide.setAttribute('stroke-dasharray', '3 3');
+              guide.setAttribute('pointer-events', 'none');
+              target.appendChild(guide);
+            }
+            const targetLeft = Number(target.dataset.plotLeft);
+            const targetWidth = Number(target.dataset.plotWidth);
+            const targetMaxMove = Number(target.dataset.maxMove);
+            const targetTop = Number(target.dataset.plotTop);
+            const targetBottom = Number(target.dataset.plotBottom);
+            const guideX = targetLeft + comparisonHoverMove / targetMaxMove * targetWidth;
+            guide.setAttribute('x1', String(guideX));
+            guide.setAttribute('x2', String(guideX));
+            guide.setAttribute('y1', String(targetTop));
+            guide.setAttribute('y2', String(targetBottom));
+          });
+      });
+
+      svg.addEventListener('pointerleave', () => {
+        comparisonHoverMove = null;
+        elements.comparisonHoverTooltip.hidden = true;
+        document.querySelectorAll('#comparisonChart .comparison-hover-guide, #comparisonEvaluationChart .comparison-hover-guide')
+          .forEach((guide) => guide.remove());
+      });
+    }
+    function getComparisonGames() {
+            const playerName = elements.player.value;
+            return games.map((game, index) => ({ game, index }))
+              .filter(({ game, index }) => (game.white === playerName || game.black === playerName)
+                && (elements.game.value === 'all' || Number(elements.game.value) === index));
+          }
+
+          function updateOpponentClockComparison(resetPosition = false) {
+            const comparisonGames = getComparisonGames();
+            if (resetPosition) comparisonPosition = 0;
+            comparisonPosition = Math.min(comparisonPosition, Math.max(0, comparisonGames.length - 1));
+            elements.previousComparisonGame.disabled = comparisonGames.length < 2 || comparisonPosition === 0;
+            elements.nextComparisonGame.disabled = comparisonGames.length < 2 || comparisonPosition >= comparisonGames.length - 1;
+
+            const selected = comparisonGames[comparisonPosition];
+            if (!selected) {
+              elements.comparisonName.textContent = 'Load a PGN and select a player to compare clocks.';
+              elements.comparisonChart.innerHTML = '<div class="empty-chart">The selected player\'s games will appear here.</div>';
+              elements.comparisonLegend.replaceChildren();
+              elements.comparisonEvaluationChart.innerHTML = '<div class="empty-chart">Evaluation data will appear here.</div>';
+              return;
+            }
+
+            const { game } = selected;
+            const playerName = elements.player.value;
+            const opponentName = game.white === playerName ? game.black : game.white;
+            const initialClock = (Number(elements.initialTime.value) || 0) * 60;
+            const selectedColor = '#1c674d';
+            const opponentColor = '#d26b50';
+            const series = [
+              { name: opponentName, side: opponentName === game.white ? 'white' : 'black', color: opponentColor, points: [{ x: 0, y: initialClock }] },
+              { name: playerName, side: playerName === game.white ? 'white' : 'black', color: selectedColor, points: [{ x: 0, y: initialClock }] }
+            ];
+
+            game.moves.forEach((move, index) => {
+              if (move.clock == null) return;
+              const playerSeries = series.find((entry) => entry.side === move.color);
+              if (playerSeries) playerSeries.points.push({ x: index + 1, y: move.clock, ...getQualityAnnotation(move.san) });
+            });
+
+            elements.comparisonName.textContent = `Game ${comparisonPosition + 1} of ${comparisonGames.length} · ${formatGame(game)}`;
+            drawOpponentClockChart(game, series, initialClock);
+            drawEvaluationChart(game, playerName);
+          }
+
+          function drawOpponentClockChart(game, series, initialClock) {
+            const width = 900;
+            const height = 400;
+            const margin = { top: 20, right: 22, bottom: 52, left: 72 };
+            const plotWidth = width - margin.left - margin.right;
+            const plotHeight = height - margin.top - margin.bottom;
+            const maxMove = Math.max(1, game.moves.length);
+            const maxClock = Math.max(initialClock, ...series.flatMap((entry) => entry.points.map((point) => point.y)));
+            const targetMinuteStep = Math.max(1, maxClock / 60 / 5);
+            const magnitude = 10 ** Math.floor(Math.log10(targetMinuteStep));
+            const minuteStep = [1, 2, 5, 10].map((factor) => factor * magnitude)
+              .find((step) => step >= targetMinuteStep) || 10 * magnitude;
+            const secondStep = minuteStep * 60;
+            const yMaximum = Math.max(secondStep, Math.ceil(maxClock / secondStep) * secondStep);
+            const x = (value) => margin.left + value / maxMove * plotWidth;
+            const y = (value) => margin.top + (yMaximum - value) / yMaximum * plotHeight;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.setAttribute('role', 'img');
+            svg.setAttribute('aria-label', `Remaining clock time for ${game.white} and ${game.black}`);
+            svg.dataset.maxMove = String(maxMove);
+            svg.dataset.plotLeft = String(margin.left);
+            svg.dataset.plotWidth = String(plotWidth);
+            svg.dataset.plotTop = String(margin.top);
+            svg.dataset.plotBottom = String(height - margin.bottom);
+            const add = (tag, attributes = {}) => {
+              const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+              Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+              svg.appendChild(node);
+              return node;
+            };
+
+            drawCompletedMoveAxis(svg, maxMove, x, margin.top, height - margin.bottom, height - margin.bottom + 19);
+
+            for (let clockValue = 0; clockValue <= yMaximum; clockValue += secondStep) {
+              const yPosition = y(clockValue);
+              add('line', { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition, stroke: '#e5e9e1' });
+              const label = add('text', { x: margin.left - 10, y: yPosition + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11 });
+              label.textContent = formatSeconds(clockValue);
+            }
+
+            const yTitle = add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-weight': 600 });
+            yTitle.textContent = 'Remaining clock time (mm:ss)';
+
+            series.forEach((entry) => {
+              const pathData = entry.points.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.x)},${y(point.y)}`).join(' ');
+              add('path', { d: pathData, fill: 'none', stroke: entry.color, 'stroke-width': 2.5 });
+              entry.points.forEach((point) => {
+                const circle = add('circle', { cx: x(point.x), cy: y(point.y), r: 4, fill: entry.color, stroke: '#fffefa', 'stroke-width': 1.5 });
+                const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                title.textContent = `${entry.name} · Zug ${point.x} · ${formatSeconds(point.y)}`;
+                circle.appendChild(title);
+                if (point.symbol) {
+                  const annotation = add('text', {
+                    x: x(point.x), y: y(point.y) - 9, 'text-anchor': 'middle',
+                    fill: point.color, stroke: '#fffefa', 'stroke-width': 3, 'paint-order': 'stroke',
+                    'font-size': 10, 'font-weight': 800
+                  });
+                  annotation.textContent = point.symbol;
+                }
+              });
+            });
+
+            elements.comparisonChart.replaceChildren(svg);
+            bindComparisonHover(svg, game, elements.player.value);
+            elements.comparisonLegend.replaceChildren(...series.map((entry) => {
+              const item = document.createElement('span');
+              item.className = 'comparison-legend-item';
+              item.style.color = entry.color;
+              const line = document.createElement('span');
+              line.className = 'comparison-legend-line';
+              const label = document.createElement('span');
+              label.textContent = entry.name;
+              item.append(line, label);
+              return item;
+            }));
+          }
+
+          function drawEvaluationChart(game, playerName) {
+            const selectedIsWhite = game.white === playerName;
+            const evaluationPoints = [{ x: 0, value: game.initialEvaluation || 0 }];
+            game.moves.forEach((move, index) => {
+              if (move.evaluation == null) return;
+              const playerEvaluation = selectedIsWhite ? move.evaluation : -move.evaluation;
+              evaluationPoints.push({ x: index + 1, value: Math.max(-8, Math.min(8, playerEvaluation)) });
+            });
+
+            if (!game.moves.some((move) => move.evaluation != null)) {
+              elements.comparisonEvaluationChart.innerHTML = '<div class="empty-chart">No evaluation annotations found in this game.</div>';
+              return;
+            }
+
+            const width = 900;
+            const height = 300;
+            const margin = { top: 16, right: 22, bottom: 34, left: 72 };
+            const plotWidth = width - margin.left - margin.right;
+            const plotHeight = height - margin.top - margin.bottom;
+            const maxMove = Math.max(1, game.moves.length);
+            const x = (value) => margin.left + value / maxMove * plotWidth;
+            const transformEvaluation = (value) => {
+              const magnitude = Math.abs(value);
+              return Math.sign(value) * (magnitude <= 1 ? magnitude : 1 + Math.log2(magnitude));
+            };
+            const y = (value) => margin.top + (4 - transformEvaluation(value)) / 8 * plotHeight;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.setAttribute('role', 'img');
+            svg.setAttribute('aria-label', `Evaluation from ${playerName}'s perspective for ${game.white} and ${game.black}`);
+            svg.dataset.maxMove = String(maxMove);
+            svg.dataset.plotLeft = String(margin.left);
+            svg.dataset.plotWidth = String(plotWidth);
+            svg.dataset.plotTop = String(margin.top);
+            svg.dataset.plotBottom = String(height - margin.bottom);
+            const add = (tag, attributes = {}) => {
+              const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+              Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+              svg.appendChild(node);
+              return node;
+            };
+
+            drawCompletedMoveAxis(svg, maxMove, x, margin.top, height - margin.bottom, height - margin.bottom + 18);
+
+            [-8, -4, -2, -1, 0, 1, 2, 4, 8].forEach((value) => {
+              const yPosition = y(value);
+              add('line', { x1: margin.left, y1: yPosition, x2: width - margin.right, y2: yPosition, stroke: value === 0 ? '#849189' : '#e5e9e1', 'stroke-width': value === 0 ? 1.4 : 1 });
+              const label = add('text', { x: margin.left - 10, y: yPosition + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11 });
+              label.textContent = value > 0 ? `+${value}` : String(value);
+            });
+
+            const yTitle = add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-weight': 600 });
+            yTitle.textContent = 'Evaluation';
+
+            const pathData = evaluationPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.x)},${y(point.value)}`).join(' ');
+            add('path', { d: pathData, fill: 'none', stroke: '#1c674d', 'stroke-width': 2.5 });
+            evaluationPoints.forEach((point) => {
+              const circle = add('circle', { cx: x(point.x), cy: y(point.value), r: 3.5, fill: '#1c674d', stroke: '#fffefa', 'stroke-width': 1.2 });
+              const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+              title.textContent = `${playerName} · Zug ${point.x} · ${point.value > 0 ? '+' : ''}${point.value.toFixed(2)}`;
+              circle.appendChild(title);
+            });
+
+            elements.comparisonEvaluationChart.replaceChildren(svg);
+            bindComparisonHover(svg, game, playerName);
+          }
+
+          function collectPlayerMoves(selectedGames, playerName, timeControl) {
       const points = [];
       selectedGames.forEach((game, gameIndex) => {
         const playsWhite = game.white === playerName;
@@ -381,17 +794,62 @@
             spent += timeControl.additionalMinutes * 60;
             additionalTimeUsed = true;
           }
-          if (spent == null || evaluationChange == null) return;
-          const quality = move.san.endsWith('??') ? 'blunder' : move.san.endsWith('?!') ? 'dubious' : move.san.endsWith('?') ? 'mistake' : 'default';
-          points.push({ x: spent, y: playsWhite ? evaluationChange : -evaluationChange, game, gameIndex, moveNumber: Math.floor(moveIndex / 2) + 1, move, color: qualityColors[quality] });
+          if (spent == null) return;
+          const quality = move.san.endsWith('??') ? 'blunder' : move.san.endsWith('?!') ? 'inaccuracy' : move.san.endsWith('?') ? 'error' : 'ok';
+          points.push({ x: spent, y: evaluationChange == null ? null : playsWhite ? evaluationChange : -evaluationChange, game, gameIndex, moveNumber: Math.floor(moveIndex / 2) + 1, move, quality, color: qualityColors[quality] || qualityColors.default });
         });
       });
       return points;
     }
 
+    function renderMoveStatistics(moves) {
+      const categories = [
+        { label: '0-10 sec', maximum: 10 },
+        { label: '10-30 sec', maximum: 30 },
+        { label: '30-60 sec', maximum: 60 },
+        { label: '1-3 min', maximum: 180 },
+        { label: '3-10 min', maximum: 600 },
+        { label: '10+ min', maximum: Infinity }
+      ].map((category) => ({ ...category, counts: [0, 0, 0, 0, 0] }));
+      const qualityIndex = { ok: 1, inaccuracy: 2, error: 3, blunder: 4 };
+
+      moves.forEach((move) => {
+        if (move.x < 0) return;
+        const categoryIndex = categories.findIndex((category) => move.x < category.maximum);
+        if (categoryIndex < 0) return;
+        const counts = categories[categoryIndex].counts;
+        counts[0] += 1;
+        counts[qualityIndex[move.quality]] += 1;
+      });
+
+      elements.moveStatsBody.replaceChildren(...categories.map((category) => {
+        const row = document.createElement('tr');
+        const label = document.createElement('th');
+        label.scope = 'row';
+        label.textContent = category.label;
+        row.appendChild(label);
+
+        category.counts.forEach((count) => {
+          const cell = document.createElement('td');
+          const countLabel = document.createElement('span');
+          countLabel.className = 'count';
+          countLabel.textContent = String(count);
+          const percentage = document.createElement('span');
+          percentage.className = 'percentage';
+          percentage.textContent = `${category.counts[0] ? (count / category.counts[0] * 100).toFixed(1) : '0.0'}%`;
+          cell.append(countLabel, percentage);
+          row.appendChild(cell);
+        });
+
+        return row;
+      }));
+    }
     function drawChart(points) {
       elements.chart.replaceChildren();
       if (points.length === 0) {
+        elements.zoomOut.disabled = true;
+        elements.zoomIn.disabled = true;
+        elements.resetZoom.disabled = true;
         const empty = document.createElement('div');
         empty.className = 'empty-chart';
         empty.textContent = 'Keine Züge mit verwertbarer Uhrzeit und Bewertungsänderung in der Auswahl gefunden.';
@@ -408,12 +866,12 @@
       const maxX = Math.max(0, ...points.map((point) => point.x));
       const minY = Math.min(0, ...points.map((point) => point.y));
       const maxY = Math.max(0, ...points.map((point) => point.y));
-      const xPadding = Math.max(10, (maxX - minX) * .08);
-      const yPadding = Math.max(.1, (maxY - minY) * .1);
-      const xLow = minX - xPadding;
-      const xHigh = maxX + xPadding || 1;
-      const yLow = minY - yPadding;
-      const yHigh = maxY + yPadding || 1;
+      const xPadding = Math.max(60, (maxX - minX) * .08);
+      const yPadding = Math.max(.5, (maxY - minY) * .1);
+      const xLow = (minX - xPadding) / zoomLevel;
+      const xHigh = (maxX + xPadding || 1) / zoomLevel;
+      const yLow = (minY - yPadding) / zoomLevel;
+      const yHigh = (maxY + yPadding || 1) / zoomLevel;
       const x = (value) => margin.left + (value - xLow) / (xHigh - xLow) * plotWidth;
       const y = (value) => margin.top + (yHigh - value) / (yHigh - yLow) * plotHeight;
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -427,18 +885,26 @@
         return node;
       };
 
-      const tickCount = 5;
-      for (let index = 0; index <= tickCount; index += 1) {
-        const xValue = xLow + (xHigh - xLow) * index / tickCount;
-        const yValue = yLow + (yHigh - yLow) * index / tickCount;
+      const targetMinuteStep = Math.max(1, (xHigh - xLow) / 300);
+      const magnitude = 10 ** Math.floor(Math.log10(targetMinuteStep));
+      const minuteStep = [1, 2, 5, 10].map((factor) => factor * magnitude)
+        .reduce((best, step) => Math.abs(Math.log(step / targetMinuteStep)) < Math.abs(Math.log(best / targetMinuteStep)) ? step : best);
+      const secondStep = minuteStep * 60;
+      for (let xValue = Math.ceil(xLow / secondStep) * secondStep; xValue <= xHigh; xValue += secondStep) {
         const xPos = x(xValue);
-        const yPos = y(yValue);
         add('line', { x1: xPos, y1: margin.top, x2: xPos, y2: height - margin.bottom, stroke: '#e5e9e1', 'stroke-width': 1 });
-        add('line', { x1: margin.left, y1: yPos, x2: width - margin.right, y2: yPos, stroke: '#e5e9e1', 'stroke-width': 1 });
         const xLabel = add('text', { x: xPos, y: height - margin.bottom + 19, 'text-anchor': 'middle', fill: '#66736c', 'font-size': 11, 'font-family': 'Segoe UI, sans-serif' });
-        xLabel.textContent = Math.round(xValue);
-        const yLabel = add('text', { x: margin.left - 10, y: yPos + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11, 'font-family': 'Segoe UI, sans-serif' });
-        yLabel.textContent = yValue.toFixed(1);
+        const absoluteMinutes = Math.floor(Math.abs(xValue) / 60);
+        xLabel.textContent = `${xValue < 0 ? '−' : ''}${String(absoluteMinutes).padStart(2, '0')}:00`;
+      }
+
+      for (let yValue = Math.ceil(yLow); yValue <= Math.floor(yHigh); yValue += 1) {
+        const yPos = y(yValue);
+        add('line', { x1: margin.left, y1: yPos, x2: width - margin.right, y2: yPos, stroke: '#e5e9e1', 'stroke-width': 1 });
+        if ([1, 2, 4].includes(Math.abs(yValue))) {
+          const yLabel = add('text', { x: margin.left - 10, y: yPos + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11, 'font-family': 'Segoe UI, sans-serif' });
+          yLabel.textContent = String(yValue);
+        }
       }
 
       add('line', { x1: x(0), y1: margin.top, x2: x(0), y2: height - margin.bottom, stroke: '#849189', 'stroke-width': 1.4 });
@@ -449,6 +915,7 @@
       yTitle.textContent = 'Bewertungsänderung (Bauern)';
 
       points.forEach((point) => {
+        if (point.x < xLow || point.x > xHigh || point.y < yLow || point.y > yHigh) return;
         const circle = add('circle', { cx: x(point.x), cy: y(point.y), r: 5, fill: point.color, 'fill-opacity': .9, stroke: '#fffefa', 'stroke-width': 1.5 });
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
         const moveNotation = `${point.moveNumber}${point.move.color === 'white' ? '.' : '...'} ${point.move.san}`;
@@ -457,6 +924,9 @@
       });
 
       elements.chart.appendChild(svg);
+      elements.zoomOut.disabled = zoomLevel <= 1;
+      elements.zoomIn.disabled = zoomLevel >= 32;
+      elements.resetZoom.disabled = zoomLevel === 1;
     }
 
     function analyze() {
@@ -471,10 +941,14 @@
         incrementSeconds: Number(elements.incrementTime.value) || 0,
         additionalMinutes: Number(elements.additionalTime.value) || 0
       };
-      const points = collectPoints(selectedGames, playerName, timeControl);
+      const playerMoves = collectPlayerMoves(selectedGames, playerName, timeControl);
+      const points = playerMoves.filter((move) => move.y != null);
       elements.selectedGames.textContent = String(selectedGames.length);
+      renderMoveStatistics(playerMoves);
       elements.selectedMoves.textContent = String(totalMoves);
       elements.plottedMoves.textContent = String(points.length);
+      lastPoints = points;
+      zoomLevel = 1;
       drawChart(points);
       setStatus(`${selectedGames.length} ${selectedGames.length === 1 ? 'Partie' : 'Partien'} ausgewertet.`);
     }
@@ -499,7 +973,12 @@
         elements.selectedGames.textContent = '–';
         elements.selectedMoves.textContent = '–';
         elements.plottedMoves.textContent = '–';
+        lastPoints = [];
+        zoomLevel = 1;
         elements.chart.innerHTML = '<div class="empty-chart">Partien auswählen und <strong>Analysieren</strong> klicken, um das Diagramm anzuzeigen.</div>';
+        elements.zoomOut.disabled = true;
+        elements.zoomIn.disabled = true;
+        elements.resetZoom.disabled = true;
         setStatus(`${games.length} Partien geladen.`);
       } catch (error) {
         games = [];
@@ -516,9 +995,49 @@
     });
 
     elements.player.addEventListener('change', updatePlayerCount);
+        elements.game.addEventListener('change', () => updateOpponentClockComparison(true));
+        elements.previousComparisonGame.addEventListener('click', () => {
+          comparisonPosition = Math.max(0, comparisonPosition - 1);
+          updateOpponentClockComparison();
+        });
+        elements.nextComparisonGame.addEventListener('click', () => {
+          comparisonPosition += 1;
+          updateOpponentClockComparison();
+        });
+        [elements.initialTime, elements.incrementTime, elements.additionalTime].forEach((input) => {
+          input.addEventListener('input', () => updateOpponentClockComparison());
+        });
     elements.analyze.addEventListener('click', analyze);
+    elements.zoomIn.addEventListener('click', () => {
+      zoomLevel = Math.min(32, zoomLevel * 1.25);
+      drawChart(lastPoints);
+    });
+    elements.zoomOut.addEventListener('click', () => {
+      zoomLevel = Math.max(1, zoomLevel / 1.25);
+      drawChart(lastPoints);
+    });
+    elements.resetZoom.addEventListener('click', () => {
+      zoomLevel = 1;
+      drawChart(lastPoints);
+    });
+    elements.expandChart.addEventListener('click', () => {
+      const expanded = elements.expandChart.getAttribute('aria-expanded') !== 'true';
+      document.querySelector('main').classList.toggle('chart-expanded', expanded);
+      document.querySelector('main').classList.toggle('chart-expanded', expanded);
+      document.querySelector('main').style.width = expanded ? 'min(1600px, calc(100% - 40px))' : '';
+      document.querySelector('.workflow').classList.toggle('chart-expanded', expanded);
+      elements.expandChart.setAttribute('aria-expanded', String(expanded));
+      elements.expandChart.textContent = expanded ? 'Collapse chart' : 'Expand chart';
+      if (lastPoints.length) requestAnimationFrame(() => drawChart(lastPoints));
+    });
+    elements.chart.addEventListener('wheel', (event) => {
+      if (!lastPoints.length) return;
+      event.preventDefault();
+      zoomLevel = Math.max(1, Math.min(32, zoomLevel * (event.deltaY < 0 ? 1.2 : 1 / 1.2)));
+      drawChart(lastPoints);
+    }, { passive: false });
     window.addEventListener('resize', () => {
-      if (elements.selectedGames.textContent !== '–' && elements.player.value) analyze();
+      if (lastPoints.length) drawChart(lastPoints);
     });
   </script>
 </body>
