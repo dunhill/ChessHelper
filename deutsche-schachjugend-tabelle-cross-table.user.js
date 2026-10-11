@@ -156,7 +156,7 @@
       // For round pages we need stable ordering within ties.
       // Parse rows into objects containing displayed rank, initial standing (tuz) and points.
       const headerCells = Array.from(table.querySelectorAll('thead th'));
-      const pointsHeaderIndex = headerCells.findIndex((th) => /Pkt|Punkte|Punkte/i.test(th.textContent));
+      const pointsHeaderIndex = headerCells.findIndex((th) => /Pkt|Punkte|Punkte|MP/i.test(th.textContent));
       const rows = Array.from(table.querySelectorAll('tbody tr'));
       const parsed = [];
       rows.forEach((row, index) => {
