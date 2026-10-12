@@ -32,6 +32,7 @@
 
     main { width: min(1100px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 64px; }
     main.chart-expanded { width: min(1600px, calc(100% - 40px)); }
+    main.comparison-expanded { width: min(1600px, calc(100% - 40px)); }
     .eyebrow { margin: 0 0 8px; color: var(--green); font: 700 .76rem/1.2 "Courier New", monospace; text-transform: uppercase; }
     h1 { margin: 0; font: 500 clamp(2rem, 5vw, 3.15rem)/1.05 Georgia, "Times New Roman", serif; letter-spacing: 0; }
     .intro { max-width: 680px; margin: 12px 0 28px; color: var(--muted); line-height: 1.55; }
@@ -45,6 +46,9 @@
     .workflow { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 28px; align-items: start; }
     .workflow.chart-expanded { grid-template-columns: minmax(0, 1fr); }
     .workflow.chart-expanded .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .workflow.comparison-expanded { grid-template-columns: minmax(0, 1fr); }
+    .workflow.comparison-expanded .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .workflow.comparison-expanded .move-comparison { grid-column: 1 / -1; }
     .steps { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); box-shadow: var(--shadow); }
     .step { background: var(--surface); padding: 21px 22px 23px; }
     .step-heading { display: flex; align-items: baseline; gap: 10px; margin: 0 0 15px; font: 600 1.08rem/1.3 Georgia, "Times New Roman", serif; }
@@ -114,12 +118,14 @@
     .move-stats .empty-cell { padding: 20px 12px; color: var(--muted); text-align: left; }
     .move-comparison { min-width: 0; background: var(--surface); padding: 21px 22px 23px; border: 1px solid var(--line); box-shadow: var(--shadow); }
     .move-comparison h2 { margin: 0; font: 600 1.08rem/1.3 Georgia, "Times New Roman", serif; }
+      .move-comparison-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .move-comparison-intro { margin: 7px 0 13px; color: var(--muted); font-size: .8rem; line-height: 1.45; }
     .move-comparison table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .78rem; }
     .move-comparison th, .move-comparison td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
     .move-comparison th { color: var(--muted); font-size: .69rem; font-weight: 700; }
     .move-comparison th:first-child, .move-comparison td:first-child { text-align: left; }
     .move-comparison td .count { display: block; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .move-comparison td .average { display: block; margin-top: 2px; color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; }
     .move-comparison td .percentage { display: block; margin-top: 2px; color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; }
     .move-comparison .empty-cell { padding: 18px 6px; color: var(--muted); text-align: left; white-space: normal; }
     .move-comparison-chart { width: 100%; margin-top: 10px; }
@@ -145,7 +151,9 @@
       main { width: min(100% - 26px, 560px); padding-top: 27px; }
       .workflow { grid-template-columns: 1fr; gap: 27px; }
       .workflow.chart-expanded .steps { grid-template-columns: 1fr; }
+      .workflow.comparison-expanded .steps { grid-template-columns: 1fr; }
       main.chart-expanded { width: calc(100% - 26px); }
+      main.comparison-expanded { width: calc(100% - 26px); }
       .chart-heading { align-items: flex-start; flex-wrap: wrap; }
       .game-controls { grid-template-columns: 1fr; gap: 16px; }
       .stat { padding-right: 9px; }
@@ -212,8 +220,11 @@
           </div>
         </div>
         <section class="move-comparison" aria-labelledby="moveComparisonTitle">
-          <h2 id="moveComparisonTitle">Move comparison by time</h2>
-          <p class="move-comparison-intro">Each count is followed by its share of that column's total.</p>
+          <div class="move-comparison-heading">
+            <h2 id="moveComparisonTitle">Move comparison by time</h2>
+            <button class="chart-tool chart-tool-expand" id="expandMoveComparison" type="button" aria-expanded="false">Expand chart</button>
+          </div>
+          <p class="move-comparison-intro">Each cell shows move count, average move time, and share of that column's total.</p>
           <div class="table-wrap">
             <table>
               <thead>
@@ -338,6 +349,7 @@
       comparePlayer: document.getElementById('comparePlayerSelect'), moveComparisonBody: document.getElementById('moveComparisonBody'),
       additionalComparePlayers: document.getElementById('additionalComparePlayers'),
       moveComparisonHead: document.getElementById('moveComparisonHead'), moveComparisonChart: document.getElementById('moveComparisonChart'),
+      expandMoveComparison: document.getElementById('expandMoveComparison'),
       addComparedPlayer: document.getElementById('addComparedPlayer'),
       previousComparisonGame: document.getElementById('previousComparisonGame'),
       nextComparisonGame: document.getElementById('nextComparisonGame')
@@ -939,12 +951,17 @@
 
     function renderMoveStatistics(moves) {
       const categories = [
-        { label: '0-10 sec', maximum: 10 },
-        { label: '10-30 sec', maximum: 30 },
-        { label: '30-60 sec', maximum: 60 },
-        { label: '1-3 min', maximum: 180 },
-        { label: '3-10 min', maximum: 600 },
-        { label: '10+ min', maximum: Infinity }
+        { label: 'Under 5 sec', maximum: 5 },
+        { label: '5-10 sec', maximum: 10 },
+        { label: '10-20 sec', maximum: 20 },
+        { label: '20-35 sec', maximum: 35 },
+        { label: '35-60 sec', maximum: 60 },
+        { label: '1-2 min', maximum: 120 },
+        { label: '2-4 min', maximum: 240 },
+        { label: '4-7 min', maximum: 420 },
+        { label: '7-10 min', maximum: 600 },
+        { label: '10-15 min', maximum: 900 },
+        { label: '15+ min', maximum: Infinity }
       ].map((category) => ({ ...category, counts: [0, 0, 0, 0, 0] }));
       const qualityIndex = { ok: 1, inaccuracy: 2, error: 3, blunder: 4 };
 
@@ -989,13 +1006,22 @@
       const comparedPlayers = getComparedPlayerNames();
 
       const categories = [
-        { label: '0-10 sec', maximum: 10 },
-        { label: '10-30 sec', maximum: 30 },
-        { label: '30-60 sec', maximum: 60 },
-        { label: '1-3 min', maximum: 180 },
-        { label: '3-10 min', maximum: 600 },
-        { label: '10+ min', maximum: Infinity }
-      ].map((category) => ({ ...category, counts: Array(2 + comparedPlayers.length).fill(0) }));
+        { label: 'Under 5 sec', maximum: 5 },
+        { label: '5-10 sec', maximum: 10 },
+        { label: '10-20 sec', maximum: 20 },
+        { label: '20-35 sec', maximum: 35 },
+        { label: '35-60 sec', maximum: 60 },
+        { label: '1-2 min', maximum: 120 },
+        { label: '2-4 min', maximum: 240 },
+        { label: '4-7 min', maximum: 420 },
+        { label: '7-10 min', maximum: 600 },
+        { label: '10-15 min', maximum: 900 },
+        { label: '15+ min', maximum: Infinity }
+      ].map((category) => ({
+              ...category,
+              counts: Array(2 + comparedPlayers.length).fill(0),
+              timeTotals: Array(2 + comparedPlayers.length).fill(0)
+            }));
       const comparedMoves = comparedPlayers.map((playerName) => collectPlayerMoves(games, playerName, timeControl));
       const allPgnMoves = games.flatMap((game) =>
         Array.from(new Set([game.white, game.black]))
@@ -1007,7 +1033,10 @@
         moves.forEach((move) => {
           if (move.x < 0) return;
           const category = categories.find((candidate) => move.x < candidate.maximum);
-          if (category) category.counts[columnIndex] += 1;
+          if (category) {
+            category.counts[columnIndex] += 1;
+            category.timeTotals[columnIndex] += move.x;
+          }
         });
       });
 
@@ -1042,9 +1071,12 @@
           countLabel.className = 'count';
           countLabel.textContent = String(count);
           const percentage = document.createElement('span');
+          const average = document.createElement('span');
+          average.className = 'average';
+          average.textContent = `Avg ${count ? formatSeconds(category.timeTotals[columnIndex] / count) : '—'}`;
           percentage.className = 'percentage';
           percentage.textContent = `${columnTotals[columnIndex] ? (count / columnTotals[columnIndex] * 100).toFixed(1) : '0.0'}%`;
-          cell.append(countLabel, percentage);
+          cell.append(countLabel, average, percentage);
           row.appendChild(cell);
         });
 
@@ -1286,6 +1318,13 @@
     elements.comparePlayer.addEventListener('change', refreshComparedPlayers);
     elements.additionalComparePlayers.addEventListener('change', refreshComparedPlayers);
     elements.addComparedPlayer.addEventListener('click', addComparePlayerSelect);
+    elements.expandMoveComparison.addEventListener('click', () => {
+      const expanded = elements.expandMoveComparison.getAttribute('aria-expanded') !== 'true';
+      document.querySelector('main').classList.toggle('comparison-expanded', expanded);
+      document.querySelector('.workflow').classList.toggle('comparison-expanded', expanded);
+      elements.expandMoveComparison.setAttribute('aria-expanded', String(expanded));
+      elements.expandMoveComparison.textContent = expanded ? 'Collapse chart' : 'Expand chart';
+    });
     elements.game.addEventListener('change', () => {
       updateOpponentClockComparison(true);
       if (elements.player.value) analyze();
