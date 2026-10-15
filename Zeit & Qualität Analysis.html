@@ -68,12 +68,14 @@
     .game-field { margin-top: 0; min-width: 0; }
       .compare-player-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; align-items: end; }
       .compare-player-list { display: grid; gap: 8px; margin-top: 8px; }
+      .compare-player-row { display: grid; gap: 8px; }
     .time-control { min-width: 0; margin: 0; padding: 0; border: 0; }
     .time-control legend { margin-bottom: 7px; color: var(--muted); font-size: .78rem; font-weight: 700; }
     .time-control-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
     .time-control-fields label { min-width: 0; color: var(--muted); font-size: .68rem; line-height: 1.25; }
     .time-control-fields input { display: block; width: 100%; min-width: 0; height: 39px; margin-top: 5px; padding: 6px; border: 1px solid var(--line); border-radius: 0; background: #fff; color: var(--ink); font: inherit; font-size: .85rem; }
     .file-name { min-height: 18px; margin: 10px 0 0; color: var(--green-dark); font-size: .82rem; overflow-wrap: anywhere; }
+    .file-name { min-height: 18px; margin: 10px 0 0; color: var(--green-dark); font-size: .82rem; overflow-wrap: anywhere; white-space: pre-line; }
 
     .analyze-row { display: flex; align-items: center; gap: 13px; margin-top: 18px; }
     button { min-height: 44px; padding: 0 21px; border: 0; border-radius: 0; background: var(--green); color: white; font: 700 .9rem "Segoe UI", sans-serif; cursor: pointer; transition: background .18s, transform .18s; }
@@ -182,9 +184,9 @@
         <div class="step">
           <h2 class="step-heading"><span class="step-number">01</span> PGN-Datei laden</h2>
           <label class="file-drop" for="pgnFile">
-            <strong>PGN-Datei auswählen</strong>
+            <strong>PGN-Dateien auswählen</strong>
             <span>Standard-PGN mit [%clk] und [%eval] Kommentaren</span>
-            <input id="pgnFile" type="file" accept=".pgn,.txt,text/plain,application/x-chess-pgn">
+            <input id="pgnFile" type="file" accept=".pgn,.txt,text/plain,application/x-chess-pgn" multiple>
           </label>
           <p class="file-name" id="fileName" aria-live="polite"></p>
         </div>
@@ -192,6 +194,8 @@
           <h2 class="step-heading"><span class="step-number">02</span> Spieler und Partien</h2>
           <label class="field-label" for="playerSelect">Spieler</label>
           <select id="playerSelect" disabled><option value="">Zuerst eine PGN-Datei laden</option></select>
+          <label class="field-label" for="playerEventSelect">Event for selected player</label>
+          <select id="playerEventSelect" disabled><option value="all">All events</option></select>
           <p class="player-count" id="playerCountText" aria-live="polite">Die Spielerliste wird nach dem Laden erstellt.</p>
           <label class="field-label" for="comparePlayerSelect">Compare to player (optional)</label>
           <div class="compare-player-controls">
@@ -200,6 +204,8 @@
             </select>
             <button id="addComparedPlayer" type="button" aria-label="Add another comparison player" title="Add another comparison player" disabled>+</button>
           </div>
+          <label class="field-label" for="comparePlayerEventSelect">Event for compared player</label>
+          <select id="comparePlayerEventSelect" disabled><option value="all">All events</option></select>
           <div class="compare-player-list" id="additionalComparePlayers"></div>
           <div class="game-controls">
             <div class="game-field">
@@ -333,6 +339,7 @@
       file: document.getElementById('pgnFile'), fileName: document.getElementById('fileName'),
       totalGames: document.getElementById('totalGames'), qualifiedGames: document.getElementById('qualifiedGames'),
       playerGameCount: document.getElementById('playerGameCount'), player: document.getElementById('playerSelect'),
+        playerEvent: document.getElementById('playerEventSelect'),
       playerCountText: document.getElementById('playerCountText'), game: document.getElementById('gameSelect'),
       initialTime: document.getElementById('initialTime'), incrementTime: document.getElementById('incrementTime'),
       additionalTime: document.getElementById('additionalTime'),
@@ -347,6 +354,7 @@
         comparisonHoverTooltip: document.getElementById('comparisonHoverTooltip'),
       logarithmicClockScale: document.getElementById('logarithmicClockScale'),
       comparePlayer: document.getElementById('comparePlayerSelect'), moveComparisonBody: document.getElementById('moveComparisonBody'),
+        comparePlayerEvent: document.getElementById('comparePlayerEventSelect'),
       additionalComparePlayers: document.getElementById('additionalComparePlayers'),
       moveComparisonHead: document.getElementById('moveComparisonHead'), moveComparisonChart: document.getElementById('moveComparisonChart'),
       expandMoveComparison: document.getElementById('expandMoveComparison'),
@@ -493,11 +501,31 @@
     }
 
     function getComparePlayerSelects() {
-      return [elements.comparePlayer, ...elements.additionalComparePlayers.querySelectorAll('select')];
+      return [elements.comparePlayer, ...elements.additionalComparePlayers.querySelectorAll('.comparison-player-select')];
     }
 
     function getComparedPlayerNames() {
       return Array.from(new Set(getComparePlayerSelects().map((select) => select.value).filter(Boolean)));
+    }
+
+    function getComparedPlayerEntries() {
+      return getComparePlayerSelects().map((playerSelect) => {
+        const eventSelect = playerSelect === elements.comparePlayer
+          ? elements.comparePlayerEvent
+          : playerSelect.closest('.compare-player-row').querySelector('.comparison-event-select');
+        return { playerName: playerSelect.value, eventName: eventSelect.value };
+      }).filter(({ playerName }) => playerName);
+    }
+
+    function updateEventOptions(select, playerName) {
+      const previousValue = select.value;
+      const eventNames = Array.from(new Set(games
+        .filter((game) => game.white === playerName || game.black === playerName)
+        .map((game) => game.event)))
+        .sort((a, b) => a.localeCompare(b, 'de'));
+      select.replaceChildren(new Option('All events', 'all'), ...eventNames.map((name) => new Option(name, name)));
+      select.disabled = !playerName || games.length === 0;
+      select.value = eventNames.includes(previousValue) ? previousValue : 'all';
     }
 
     function updateComparePlayerOptions(reset = false) {
@@ -510,7 +538,7 @@
       const selects = getComparePlayerSelects();
       selects.forEach((select) => {
         const previousValue = select.value;
-        const unavailable = new Set([elements.player.value]);
+        const unavailable = new Set();
         selects.forEach((other) => {
           if (other !== select && other.value) unavailable.add(other.value);
         });
@@ -523,24 +551,46 @@
         select.value = playerNames.includes(previousValue) && !unavailable.has(previousValue) ? previousValue : '';
       });
 
+      updateEventOptions(elements.comparePlayerEvent, elements.comparePlayer.value);
+      elements.additionalComparePlayers.querySelectorAll('.compare-player-row').forEach((row) => {
+        const playerSelect = row.querySelector('.comparison-player-select');
+        updateEventOptions(row.querySelector('.comparison-event-select'), playerSelect.value);
+      });
+
       const selectedComparisons = getComparedPlayerNames();
       const hasUnusedPlayers = playerNames.some((name) => name !== elements.player.value && !selectedComparisons.includes(name));
       elements.addComparedPlayer.disabled = games.length === 0 || selectedComparisons.length === 0 || !hasUnusedPlayers;
     }
 
     function addComparePlayerSelect() {
+      const row = document.createElement('div');
+      row.className = 'compare-player-row';
       const select = document.createElement('select');
       select.className = 'comparison-player-select';
       select.setAttribute('aria-label', `Compared player ${elements.additionalComparePlayers.children.length + 2}`);
-      elements.additionalComparePlayers.appendChild(select);
+      const eventSelect = document.createElement('select');
+      eventSelect.className = 'comparison-event-select';
+      eventSelect.setAttribute('aria-label', `Event for compared player ${elements.additionalComparePlayers.children.length + 2}`);
+      eventSelect.add(new Option('All events', 'all'));
+      row.append(select, eventSelect);
+      elements.additionalComparePlayers.appendChild(row);
       updateComparePlayerOptions();
+    }
+
+    function formatPlayerEvent(playerName, eventName) {
+      return eventName && eventName !== 'all' ? `${playerName} (${eventName})` : playerName;
     }
 
     function updatePlayerCount() {
       const playerName = elements.player.value;
-      const count = games.filter((game) => game.white === playerName || game.black === playerName).length;
+      updateEventOptions(elements.playerEvent, playerName);
+      const eventName = elements.playerEvent.value;
+      const count = games.filter((game) => (game.white === playerName || game.black === playerName)
+        && (eventName === 'all' || game.event === eventName)).length;
       elements.playerGameCount.textContent = playerName ? String(count) : '–';
-      elements.playerCountText.textContent = playerName ? `${count} ${count === 1 ? 'Partie' : 'Partien'} mit diesem Spieler in der Datei.` : 'Die Spielerliste wird nach dem Laden erstellt.';
+      elements.playerCountText.textContent = playerName
+        ? `${playerName}${eventName === 'all' ? '' : ` · ${eventName}`}: ${count} ${count === 1 ? 'Partie' : 'Partien'} in der Datei.`
+        : 'Die Spielerliste wird nach dem Laden erstellt.';
       updateGameOptions();
       updateOpponentClockComparison(true);
       updateComparePlayerOptions();
@@ -549,8 +599,12 @@
 
     function updateGameOptions() {
       const playerName = elements.player.value;
+      const eventName = elements.playerEvent.value;
       const current = elements.game.value;
-      const playerGames = games.map((game, index) => ({ game, index })).filter(({ game }) => game.white === playerName || game.black === playerName);
+      const playerGames = games.map((game, index) => ({ game, index })).filter(({ game }) =>
+        (game.white === playerName || game.black === playerName)
+          && (eventName === 'all' || game.event === eventName)
+      );
       elements.game.replaceChildren(new Option('Alle Partien', 'all'));
       playerGames.forEach(({ game, index }) => elements.game.add(new Option(formatGame(game), String(index))));
       elements.game.value = playerGames.some(({ index }) => String(index) === current) ? current : 'all';
@@ -705,8 +759,10 @@
     }
     function getComparisonGames() {
             const playerName = elements.player.value;
+            const eventName = elements.playerEvent.value;
             return games.map((game, index) => ({ game, index }))
               .filter(({ game, index }) => (game.white === playerName || game.black === playerName)
+                && (eventName === 'all' || game.event === eventName)
                 && (elements.game.value === 'all' || Number(elements.game.value) === index));
           }
 
@@ -1003,7 +1059,8 @@
         elements.moveComparisonChart.replaceChildren();
         return;
       }
-      const comparedPlayers = getComparedPlayerNames();
+      const comparedEntries = getComparedPlayerEntries();
+      const comparedPlayers = comparedEntries.map(({ playerName, eventName }) => formatPlayerEvent(playerName, eventName));
 
       const categories = [
         { label: 'Under 5 sec', maximum: 5 },
@@ -1022,7 +1079,11 @@
               counts: Array(2 + comparedPlayers.length).fill(0),
               timeTotals: Array(2 + comparedPlayers.length).fill(0)
             }));
-      const comparedMoves = comparedPlayers.map((playerName) => collectPlayerMoves(games, playerName, timeControl));
+      const comparedMoves = comparedEntries.map(({ playerName, eventName }) => {
+        const playerGames = games.filter((game) => (game.white === playerName || game.black === playerName)
+          && (eventName === 'all' || game.event === eventName));
+        return collectPlayerMoves(playerGames, playerName, timeControl);
+      });
       const allPgnMoves = games.flatMap((game) =>
         Array.from(new Set([game.white, game.black]))
           .flatMap((playerName) => collectPlayerMoves([game], playerName, timeControl))
@@ -1049,7 +1110,8 @@
           : 0)
       );
 
-      const columnNames = ['PGN total', elements.player.value, ...comparedPlayers];
+      const selectedPlayerName = formatPlayerEvent(elements.player.value, elements.playerEvent.value);
+      const columnNames = ['PGN total', selectedPlayerName, ...comparedPlayers];
       elements.moveComparisonHead.replaceChildren();
       ['Time per move', ...columnNames].forEach((name) => {
         const header = document.createElement('th');
@@ -1109,7 +1171,7 @@
       const comparedColors = ['#d26b50', '#3478c8', '#a2537b', '#9b7a24', '#587d43', '#7463a8'];
       const labels = [
         { name: 'PGN total', color: '#202923', values: distributions[0] },
-        { name: elements.player.value, color: '#1c674d', values: distributions[1] },
+        { name: formatPlayerEvent(elements.player.value, elements.playerEvent.value), color: '#1c674d', values: distributions[1] },
         ...comparedPlayers.map((name, index) => ({
           name,
           color: comparedColors[index % comparedColors.length],
@@ -1244,9 +1306,11 @@
 
     function analyze() {
       const playerName = elements.player.value;
+      const eventName = elements.playerEvent.value;
       const selectedGames = games.filter((game, index) => {
         const inSelectedGame = elements.game.value === 'all' || Number(elements.game.value) === index;
-        return inSelectedGame && (game.white === playerName || game.black === playerName);
+        const inSelectedEvent = eventName === 'all' || game.event === eventName;
+        return inSelectedGame && inSelectedEvent && (game.white === playerName || game.black === playerName);
       });
       const totalMoves = selectedGames.reduce((sum, game) => sum + game.moves.length, 0);
       const timeControl = {
@@ -1268,13 +1332,19 @@
     }
 
     elements.file.addEventListener('change', async () => {
-      const file = elements.file.files?.[0];
-      if (!file) return;
+      const files = Array.from(elements.file.files || []);
+      if (files.length === 0) return;
+      elements.fileName.textContent = files.map((file) => file.name).join('\n');
       try {
-        const parsed = splitPgnGames(await file.text()).map(parseGame).filter((game) => game.moves.length > 0);
+        const parsed = [];
+        for (const file of files) {
+          const fileGames = splitPgnGames(await file.text())
+            .map((block, index) => parseGame(block, parsed.length + index))
+            .filter((game) => game.moves.length > 0);
+          parsed.push(...fileGames);
+        }
         if (parsed.length === 0) throw new Error('In der Datei wurden keine Partien mit Zügen erkannt.');
         games = parsed;
-        elements.fileName.textContent = file.name;
         elements.totalGames.textContent = String(games.length);
         elements.qualifiedGames.textContent = String(games.filter((game) => game.hasClock && game.hasEvaluation).length);
         const players = playersInGames();
@@ -1305,7 +1375,6 @@
         elements.game.disabled = true;
         elements.comparePlayer.disabled = true;
         renderMoveComparison([], [], null);
-        elements.fileName.textContent = file.name;
         setStatus(error.message || 'Die PGN-Datei konnte nicht gelesen werden.', true);
       }
     });
@@ -1316,7 +1385,9 @@
       if (elements.player.value) analyze();
     };
     elements.comparePlayer.addEventListener('change', refreshComparedPlayers);
+    elements.comparePlayerEvent.addEventListener('change', refreshComparedPlayers);
     elements.additionalComparePlayers.addEventListener('change', refreshComparedPlayers);
+    elements.playerEvent.addEventListener('change', updatePlayerCount);
     elements.addComparedPlayer.addEventListener('click', addComparePlayerSelect);
     elements.expandMoveComparison.addEventListener('click', () => {
       const expanded = elements.expandMoveComparison.getAttribute('aria-expanded') !== 'true';
