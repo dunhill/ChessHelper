@@ -52,32 +52,18 @@
     }
     const rows = Array.from(table.querySelectorAll('tr'));
     console.debug(`[DWZCalc] ${context} table rows`, rows.length);
-    let eloperformanceValue = null;
-
     for (const row of rows) {
       const cells = Array.from(row.querySelectorAll('td'));
       if (cells.length < 2) continue;
       const label = cells[0].textContent.trim().toLowerCase();
       const valueText = cells[1].textContent;
-      if (label === 'elo national' || label === 'elo national:') {
+      if (label === 'elo national' || label === 'elo national:' || label === 'elon' || label === 'elon:') {
         const value = parseNumericValue(valueText);
         console.debug(`[DWZCalc] ${context} parsed Elo national`, { text: valueText, value });
         if (value > 0) {
           return value;
         }
-        console.debug(`[DWZCalc] ${context} Elo national is 0 or invalid, will use fallback`, { value });
-        continue;
       }
-      if (label === 'eloperformance' || label === 'elo performance' || label === 'elo performance:' || label === 'eloperformance:') {
-        const value = parseNumericValue(valueText);
-        console.debug(`[DWZCalc] ${context} parsed Elo performance fallback`, { text: valueText, value });
-        eloperformanceValue = value;
-      }
-    }
-
-    if (eloperformanceValue != null) {
-      console.debug(`[DWZCalc] ${context} using Eloperformance fallback`, eloperformanceValue);
-      return eloperformanceValue;
     }
 
     console.debug(`[DWZCalc] ${context} 'Elo national' row not found`);
@@ -164,6 +150,9 @@
       return null;
     }
     try {
+      const lanUrl = new URL(opponentUrl);
+      lanUrl.searchParams.set('lan', '0');
+      opponentUrl = lanUrl.toString();
       console.debug('[DWZCalc] fetch opponent page using proxy', opponentUrl);
       const response = await fetchWithProxy(opponentUrl);
       if (!response) {
@@ -424,11 +413,23 @@
       console.debug('[DWZCalc] fetching DWZ for opponent', { index, name: opp.name, url: opp.url, rating: opp.rating });
       const dwz = await fetchOpponentDWZ(opp.url);
       console.debug('[DWZCalc] fetched opponent DWZ', { index, name: opp.name, result: dwz });
-      return {
-        ...opp,
-        dwz: dwz != null ? dwz : opp.rating,
-      };
+      return { ...opp, dwz };
     }));
+
+    const missing = opponentsWithDWZ.filter((opp) => opp.dwz == null);
+    if (playerDWZ == null || missing.length > 0) {
+      const msg = playerDWZ == null
+        ? 'Fehler: DWZ (Elo national) des Spielers konnte nicht ermittelt werden. Bitte lan=0 verwenden.'
+        : `Fehler: DWZ (Elo national) konnte für folgende Gegner nicht ermittelt werden: ${missing.map((o) => o.name).join(', ')}`;
+      panel.innerHTML = '';
+      const err = document.createElement('p');
+      err.style.color = '#b00020';
+      err.style.fontWeight = 'bold';
+      err.textContent = msg;
+      panel.appendChild(err);
+      console.error('[DWZCalc]', msg);
+      return;
+    }
 
     const calculation = calculateNewDWZ(
       playerDWZ,
