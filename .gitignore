@@ -6,3 +6,7 @@ examples/LV-0-csv_v2.zip
 node_modules/
 .vscode/
 .DS_Store
+
+# WebMonitor app ignores
+WebMonitor/app/build
+WebMonitor/.gradle
