@@ -180,8 +180,7 @@
     </section>
 
     <div class="workflow">
-      <section class="steps" aria-label="Analyse einrichten">
-          <section class="steps" aria-label="Set up analysis">
+      <section class="steps" aria-label="Set up analysis">
         <div class="step">
           <h2 class="step-heading"><span class="step-number">01</span> Load PGN files</h2>
           <label class="file-drop" for="pgnFile">
@@ -223,6 +222,7 @@
             </fieldset>
           </div>
           <div class="analyze-row">
+            <button id="exportHtml" type="button" disabled>Export to HTML</button>
             <p class="status" id="status" role="status" aria-live="polite">Load a PGN file to begin.</p>
           </div>
         </div>
@@ -359,6 +359,7 @@
       moveComparisonHead: document.getElementById('moveComparisonHead'), moveComparisonChart: document.getElementById('moveComparisonChart'),
       expandMoveComparison: document.getElementById('expandMoveComparison'),
       addComparedPlayer: document.getElementById('addComparedPlayer'),
+      exportHtml: document.getElementById('exportHtml'),
       previousComparisonGame: document.getElementById('previousComparisonGame'),
       nextComparisonGame: document.getElementById('nextComparisonGame')
     };
@@ -1304,6 +1305,335 @@
       elements.resetZoom.disabled = zoomLevel === 1;
     }
 
+    // Serialized into the exported page, so it must not reference anything outside its own scope.
+    function exportedViewer(data) {
+      const SVG_NS = 'http://www.w3.org/2000/svg';
+      const timeControl = data.timeControl;
+      const playerName = data.playerName;
+      const formatSeconds = (value) => {
+        const sign = value < 0 ? '−' : '';
+        const absolute = Math.abs(value);
+        return `${sign}${Math.floor(absolute / 60)}:${String(Math.round(absolute % 60)).padStart(2, '0')}`;
+      };
+      const formatEvaluation = (value) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+      const annotation = (san) => {
+        if (san.endsWith('??')) return { symbol: '??', color: '#d34c42' };
+        if (san.endsWith('?!')) return { symbol: '?!', color: '#3478c8' };
+        if (san.endsWith('?')) return { symbol: '?', color: '#df8a36' };
+        return { symbol: '', color: '#858b88' };
+      };
+
+      function spentTimes(game, side) {
+        const spent = [];
+        let previousClock = null;
+        let moveCount = 0;
+        let extraTimeUsed = false;
+        game.moves.forEach((move, index) => {
+          if (move.color !== side) return;
+          moveCount += 1;
+          let value = null;
+          if (move.clock != null) {
+            const clockBefore = move.clock - timeControl.incrementSeconds;
+            value = moveCount === 1
+              ? timeControl.initialMinutes * 60 - clockBefore
+              : previousClock == null ? null : previousClock - clockBefore;
+            previousClock = move.clock;
+          }
+          if (value != null && value < 0 && moveCount > 40 && !extraTimeUsed) {
+            value += timeControl.additionalMinutes * 60;
+            extraTimeUsed = true;
+          }
+          spent[index] = value == null ? null : Math.max(0, value);
+        });
+        return spent;
+      }
+
+      function makeSvg(width, height, label, maxMove, margin) {
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', label);
+        svg.dataset.maxMove = String(maxMove);
+        svg.dataset.plotLeft = String(margin.left);
+        svg.dataset.plotWidth = String(width - margin.left - margin.right);
+        svg.dataset.plotTop = String(margin.top);
+        svg.dataset.plotBottom = String(height - margin.bottom);
+        const add = (tag, attributes) => {
+          const node = document.createElementNS(SVG_NS, tag);
+          Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+          svg.appendChild(node);
+          return node;
+        };
+        return { svg, add };
+      }
+
+      function drawMoveAxis(add, maxMove, x, top, bottom, labelY) {
+        const completeMoves = Math.floor(maxMove / 2);
+        const labels = new Set([0]);
+        for (let moveNumber = 5; moveNumber <= completeMoves; moveNumber += 5) labels.add(moveNumber);
+        if (completeMoves > 0) labels.add(completeMoves);
+        for (let moveNumber = 10; moveNumber <= completeMoves; moveNumber += 10) {
+          add('line', { x1: x(moveNumber * 2), y1: top, x2: x(moveNumber * 2), y2: bottom, stroke: '#e5e9e1', 'stroke-width': 1 });
+        }
+        labels.forEach((moveNumber) => {
+          add('text', { x: x(moveNumber * 2), y: labelY, 'text-anchor': 'middle', fill: '#66736c', 'font-size': 11 }).textContent = String(moveNumber);
+        });
+      }
+
+      function drawClockChart(game) {
+        const width = 900;
+        const height = 400;
+        const margin = { top: 20, right: 22, bottom: 52, left: 72 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const maxMove = Math.max(1, game.moves.length);
+        const initialClock = timeControl.initialMinutes * 60;
+        const opponentName = game.white === playerName ? game.black : game.white;
+        const series = [
+          { name: opponentName, side: opponentName === game.white ? 'white' : 'black', color: '#d26b50', points: [{ x: 0, y: initialClock }] },
+          { name: playerName, side: playerName === game.white ? 'white' : 'black', color: '#1c674d', points: [{ x: 0, y: initialClock }] }
+        ];
+        game.moves.forEach((move, index) => {
+          if (move.clock == null) return;
+          const entry = series.find((candidate) => candidate.side === move.color);
+          if (entry) entry.points.push({ x: index + 1, y: Math.max(0, move.clock - timeControl.incrementSeconds), ...annotation(move.san) });
+        });
+
+        const maxClock = Math.max(initialClock, ...series.flatMap((entry) => entry.points.map((point) => point.y)));
+        const targetMinuteStep = Math.max(1, maxClock / 60 / 5);
+        const magnitude = 10 ** Math.floor(Math.log10(targetMinuteStep));
+        const minuteStep = [1, 2, 5, 10].map((factor) => factor * magnitude).find((step) => step >= targetMinuteStep) || 10 * magnitude;
+        const secondStep = minuteStep * 60;
+        const yMaximum = Math.max(secondStep, Math.ceil(maxClock / secondStep) * secondStep);
+        const logarithmicMaximum = Math.log1p(yMaximum);
+        const x = (value) => margin.left + value / maxMove * plotWidth;
+        const y = data.logarithmic
+          ? (value) => margin.top + (logarithmicMaximum - Math.log1p(Math.max(0, value))) / logarithmicMaximum * plotHeight
+          : (value) => margin.top + (yMaximum - value) / yMaximum * plotHeight;
+        const { svg, add } = makeSvg(width, height, `Remaining clock time for ${game.white} and ${game.black}`, maxMove, margin);
+
+        drawMoveAxis(add, maxMove, x, margin.top, height - margin.bottom, height - margin.bottom + 19);
+        const ticks = data.logarithmic ? [0] : [];
+        if (data.logarithmic) {
+          for (let tickMagnitude = 1; tickMagnitude <= yMaximum; tickMagnitude *= 10) {
+            [1, 2, 5].forEach((factor) => { if (factor * tickMagnitude <= yMaximum) ticks.push(factor * tickMagnitude); });
+          }
+        } else {
+          for (let value = 0; value <= yMaximum; value += secondStep) ticks.push(value);
+        }
+        ticks.forEach((value) => {
+          add('line', { x1: margin.left, y1: y(value), x2: width - margin.right, y2: y(value), stroke: '#e5e9e1' });
+          add('text', { x: margin.left - 10, y: y(value) + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11 }).textContent = formatSeconds(value);
+        });
+        add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-weight': 600 })
+          .textContent = `Remaining clock time (mm:ss, ${data.logarithmic ? 'logarithmic' : 'linear'})`;
+
+        series.forEach((entry) => {
+          add('path', { d: entry.points.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.x)},${y(point.y)}`).join(' '), fill: 'none', stroke: entry.color, 'stroke-width': 2.5 });
+          entry.points.forEach((point) => {
+            add('circle', { cx: x(point.x), cy: y(point.y), r: 4, fill: entry.color, stroke: '#fffefa', 'stroke-width': 1.5 });
+            if (point.symbol) {
+              add('text', { x: x(point.x), y: y(point.y) - 9, 'text-anchor': 'middle', fill: point.color, stroke: '#fffefa', 'stroke-width': 3, 'paint-order': 'stroke', 'font-size': 10, 'font-weight': 800 })
+                .textContent = point.symbol;
+            }
+          });
+        });
+        return { svg, series };
+      }
+
+      function drawEvaluationChart(game) {
+        if (!game.moves.some((move) => move.evaluation != null)) return null;
+        const selectedIsWhite = game.white === playerName;
+        const points = [{ x: 0, value: game.initialEvaluation || 0 }];
+        game.moves.forEach((move, index) => {
+          if (move.evaluation == null) return;
+          points.push({ x: index + 1, value: Math.max(-8, Math.min(8, selectedIsWhite ? move.evaluation : -move.evaluation)) });
+        });
+
+        const width = 900;
+        const height = 300;
+        const margin = { top: 16, right: 22, bottom: 34, left: 72 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const maxMove = Math.max(1, game.moves.length);
+        const x = (value) => margin.left + value / maxMove * plotWidth;
+        const transform = (value) => Math.sign(value) * (Math.abs(value) <= 1 ? Math.abs(value) : 1 + Math.log2(Math.abs(value)));
+        const y = (value) => margin.top + (4 - transform(value)) / 8 * plotHeight;
+        const { svg, add } = makeSvg(width, height, `Evaluation from ${playerName}'s perspective`, maxMove, margin);
+
+        drawMoveAxis(add, maxMove, x, margin.top, height - margin.bottom, height - margin.bottom + 18);
+        [-8, -4, -2, -1, 0, 1, 2, 4, 8].forEach((value) => {
+          add('line', { x1: margin.left, y1: y(value), x2: width - margin.right, y2: y(value), stroke: value === 0 ? '#849189' : '#e5e9e1', 'stroke-width': value === 0 ? 1.4 : 1 });
+          add('text', { x: margin.left - 10, y: y(value) + 4, 'text-anchor': 'end', fill: '#66736c', 'font-size': 11 }).textContent = value > 0 ? `+${value}` : String(value);
+        });
+        add('text', { transform: `translate(17 ${margin.top + plotHeight / 2}) rotate(-90)`, 'text-anchor': 'middle', fill: '#202923', 'font-size': 12, 'font-weight': 600 }).textContent = 'Evaluation';
+        add('path', { d: points.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.x)},${y(point.value)}`).join(' '), fill: 'none', stroke: '#1c674d', 'stroke-width': 2.5 });
+        points.forEach((point) => add('circle', { cx: x(point.x), cy: y(point.value), r: 3.5, fill: '#1c674d', stroke: '#fffefa', 'stroke-width': 1.2 }));
+        return svg;
+      }
+
+      function describe(game, spentBySide, ply) {
+        const selectedIsWhite = game.white === playerName;
+        let evaluation = game.initialEvaluation ?? 0;
+        const evaluationAfterPly = [evaluation];
+        game.moves.forEach((move) => {
+          if (move.evaluation != null) evaluation = selectedIsWhite ? move.evaluation : -move.evaluation;
+          evaluationAfterPly.push(evaluation);
+        });
+        const describeSide = (side, name) => {
+          let lastIndex = -1;
+          for (let index = 0; index < Math.min(ply, game.moves.length); index += 1) {
+            if (game.moves[index].color === side) lastIndex = index;
+          }
+          if (lastIndex < 0) {
+            return `${name}: start · Remaining ${formatSeconds(timeControl.initialMinutes * 60)} · Last move — · Eval ${formatEvaluation(evaluationAfterPly[0])}`;
+          }
+          const move = game.moves[lastIndex];
+          const notation = `${Math.floor(lastIndex / 2) + 1}${side === 'white' ? '.' : '...'} ${move.san}`;
+          const remaining = move.clock == null ? 'clock unavailable' : formatSeconds(Math.max(0, move.clock - timeControl.incrementSeconds));
+          const spent = spentBySide[side][lastIndex];
+          return `${name}: ${notation} · Remaining ${remaining} · Last move ${spent == null ? 'time unavailable' : formatSeconds(spent)} · Eval ${formatEvaluation(evaluationAfterPly[lastIndex + 1])}`;
+        };
+        return `${describeSide('white', game.white)}\n${describeSide('black', game.black)}`;
+      }
+
+      const tooltip = document.getElementById('tooltip');
+      function bindHover(game, svgs) {
+        const spentBySide = { white: spentTimes(game, 'white'), black: spentTimes(game, 'black') };
+        const maxMove = Number(svgs[0].dataset.maxMove);
+        svgs.forEach((svg) => {
+          svg.addEventListener('pointermove', (event) => {
+            const bounds = svg.getBoundingClientRect();
+            const plotLeft = Number(svg.dataset.plotLeft);
+            const plotWidth = Number(svg.dataset.plotWidth);
+            const progress = Math.max(0, Math.min(1, ((event.clientX - bounds.left) / bounds.width * 900 - plotLeft) / plotWidth));
+            const hoverMove = progress * maxMove;
+            tooltip.textContent = describe(game, spentBySide, Math.max(0, Math.min(maxMove, Math.round(hoverMove))));
+            tooltip.hidden = false;
+            tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8))}px`;
+            tooltip.style.top = `${Math.max(8, Math.min(event.clientY + 12, window.innerHeight - tooltip.offsetHeight - 8))}px`;
+            svgs.forEach((target) => {
+              let guide = target.querySelector('.hover-guide');
+              if (!guide) {
+                guide = document.createElementNS(SVG_NS, 'line');
+                guide.setAttribute('class', 'hover-guide');
+                guide.setAttribute('stroke', '#252b28');
+                guide.setAttribute('stroke-width', '1.25');
+                guide.setAttribute('stroke-dasharray', '3 3');
+                guide.setAttribute('pointer-events', 'none');
+                target.appendChild(guide);
+              }
+              const guideX = Number(target.dataset.plotLeft) + hoverMove / Number(target.dataset.maxMove) * Number(target.dataset.plotWidth);
+              guide.setAttribute('x1', String(guideX));
+              guide.setAttribute('x2', String(guideX));
+              guide.setAttribute('y1', target.dataset.plotTop);
+              guide.setAttribute('y2', target.dataset.plotBottom);
+            });
+          });
+          svg.addEventListener('pointerleave', () => {
+            tooltip.hidden = true;
+            svgs.forEach((target) => target.querySelectorAll('.hover-guide').forEach((guide) => guide.remove()));
+          });
+        });
+      }
+
+      document.getElementById('subtitle').textContent =
+        `${data.eventName === 'all' ? 'All events' : data.eventName} · ${data.games.length} ${data.games.length === 1 ? 'game' : 'games'}`;
+      document.getElementById('player').textContent = playerName;
+      const container = document.getElementById('games');
+      data.games.forEach((game, index) => {
+        const section = document.createElement('section');
+        section.className = 'game';
+        const heading = document.createElement('h2');
+        heading.textContent = `Game ${index + 1} of ${data.games.length} · ${game.white} - ${game.black}, ${game.result}, ${game.date}, ${game.event}`;
+        section.appendChild(heading);
+        const clock = drawClockChart(game);
+        const legend = document.createElement('div');
+        legend.className = 'legend';
+        clock.series.forEach((entry) => {
+          const item = document.createElement('span');
+          item.style.color = entry.color;
+          item.innerHTML = '<i></i>';
+          item.append(entry.name);
+          legend.appendChild(item);
+        });
+        section.append(legend, clock.svg);
+        const evaluation = drawEvaluationChart(game);
+        if (evaluation) {
+          section.appendChild(evaluation);
+        } else {
+          const note = document.createElement('p');
+          note.className = 'note';
+          note.textContent = 'No evaluation annotations found in this game.';
+          section.appendChild(note);
+        }
+        bindHover(game, [clock.svg, evaluation].filter(Boolean));
+        container.appendChild(section);
+      });
+    }
+
+    function exportHtml() {
+      const playerName = elements.player.value;
+      const eventName = elements.playerEvent.value;
+      const exportedGames = games
+        .filter((game) => (game.white === playerName || game.black === playerName)
+          && (eventName === 'all' || game.event === eventName))
+        .map((game) => ({
+          white: game.white, black: game.black, result: game.result, date: game.date, event: game.event,
+          initialEvaluation: game.initialEvaluation,
+          moves: game.moves.map(({ san, color, clock, evaluation }) => ({ san, color, clock, evaluation }))
+        }));
+      const data = {
+        playerName,
+        eventName,
+        logarithmic: elements.logarithmicClockScale.checked,
+        timeControl: {
+          initialMinutes: Number(elements.initialTime.value) || 0,
+          incrementSeconds: Number(elements.incrementTime.value) || 0,
+          additionalMinutes: Number(elements.additionalTime.value) || 0
+        },
+        games: exportedGames
+      };
+      const json = JSON.stringify(data)
+        .replace(/</g, '\\u003c')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Time &amp; Quality Analysis</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 48px; color: #202923; background: #f4f5ef; font-family: "Segoe UI", "Trebuchet MS", sans-serif; }
+  h1 { margin: 0; font: 500 2rem Georgia, "Times New Roman", serif; }
+  #subtitle { margin: 4px 0 20px; color: #66736c; }
+  .game { width: 100%; margin-bottom: 24px; padding: 16px 20px 20px; background: #fffefa; border: 1px solid #d9dfd6; }
+  .game h2 { margin: 0 0 8px; font: 600 1.05rem Georgia, "Times New Roman", serif; }
+  .legend { display: flex; gap: 18px; margin-bottom: 6px; font-size: .85rem; }
+  .legend i { display: inline-block; width: 20px; height: 3px; margin-right: 7px; vertical-align: middle; background: currentColor; }
+  svg { display: block; width: 100%; height: auto; }
+  .note { color: #66736c; }
+  #tooltip { position: fixed; z-index: 10; max-width: min(460px, calc(100vw - 16px)); padding: 9px 11px; color: #fffefa; background: #202923; font-size: .76rem; line-height: 1.45; white-space: pre-line; pointer-events: none; }
+</style>
+</head>
+<body>
+<h1 id="player"></h1>
+<p id="subtitle"></p>
+<div id="games"></div>
+<div id="tooltip" role="tooltip" hidden></div>
+<script>(${exportedViewer.toString()})(${json});<\/script>
+</body>
+</html>
+`;
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      link.download = `${playerName.replace(/[^\w.-]+/g, '_')}${eventName === 'all' ? '' : `_${eventName.replace(/[^\w.-]+/g, '_')}`}_time-quality.html`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
     function analyze() {
       const playerName = elements.player.value;
       const eventName = elements.playerEvent.value;
@@ -1328,6 +1658,7 @@
       lastPoints = points;
       zoomLevel = 1;
       drawChart(points);
+      elements.exportHtml.disabled = false;
       setStatus(`${selectedGames.length} ${selectedGames.length === 1 ? 'game' : 'games'} analyzed.`);
     }
 
@@ -1373,6 +1704,7 @@
         elements.player.disabled = true;
         elements.game.disabled = true;
         elements.comparePlayer.disabled = true;
+        elements.exportHtml.disabled = true;
         renderMoveComparison([], [], null);
         setStatus(error.message || 'The PGN files could not be read.', true);
       }
@@ -1388,6 +1720,7 @@
     elements.additionalComparePlayers.addEventListener('change', refreshComparedPlayers);
     elements.playerEvent.addEventListener('change', updatePlayerCount);
     elements.addComparedPlayer.addEventListener('click', addComparePlayerSelect);
+    elements.exportHtml.addEventListener('click', exportHtml);
     elements.expandMoveComparison.addEventListener('click', () => {
       const expanded = elements.expandMoveComparison.getAttribute('aria-expanded') !== 'true';
       document.querySelector('main').classList.toggle('comparison-expanded', expanded);
